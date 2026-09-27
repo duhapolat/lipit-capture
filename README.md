@@ -1,6 +1,6 @@
 # Lipit Capture
 
-Kullanıcının erişim ve indirme hakkına sahip olduğu DRM korumasız medyaları yerel olarak indirmek ve klip oluşturmak için tasarlanan masaüstü uygulaması.
+Kullanıcının erişim ve indirme hakkına sahip olduğu ( öncelikle Twitter, Instagram, YouTube ) DRM korumasız medyaları yerel olarak indirmek ve klip oluşturmak için tasarlanan masaüstü uygulaması.
 
 ## Sürüm 1.0 beta 1
 
