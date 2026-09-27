@@ -6,9 +6,10 @@ Free code signing provided by [SignPath.io](https://signpath.io/), certificate b
 
 ## Release roles
 
-- Committer, reviewer and release approver: Muhammed Duha Polat
+- Source repository: [duhapolat/lipit-capture](https://github.com/duhapolat/lipit-capture)
+- Committer, reviewer and release approver: [Muhammed Duha Polat](https://github.com/duhapolat)
 
-The public GitHub repository link and GitHub role links will be added when the repository is created. Release signing will only accept artifacts produced from that repository's protected release workflow. Multi-factor authentication will be enabled for the source repository and SignPath account.
+Release signing will only accept artifacts produced from this repository's protected release workflow. Multi-factor authentication will be enabled for the source repository and SignPath account.
 
 ## Signing flow
 
