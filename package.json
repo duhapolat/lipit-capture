@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/run.mjs dev",
-    "build": "node scripts/run.mjs build",
+    "prepare:resources": "node scripts/ensure-tauri-resources.mjs",
+    "build": "npm run prepare:resources && node scripts/run.mjs build",
     "build:extension": "node apps/extension/scripts/build.mjs",
     "install:bridge": "node scripts/install-native-host.mjs",
     "check:ui": "npm --prefix apps/desktop run build",
@@ -21,7 +22,7 @@
     "licenses:generate": "node scripts/generate-third-party-licenses.mjs",
     "bundle:windows": "node scripts/bundle-windows.mjs",
     "package:windows": "node scripts/bundle-windows.mjs --package-only",
-    "check:beta": "npm run check:security && npm --prefix apps/desktop audit && npm run test:rust && npm run check:rust && npm run test:extension && npm run check:ui",
+    "check:beta": "npm run prepare:resources && npm run check:security && npm --prefix apps/desktop audit && npm run test:rust && npm run check:rust && npm run test:extension && npm run check:ui",
     "check:beta:runtime": "npm run test:native && npm run test:widget && npm run test:resolve-ui && npm run test:pipeline",
     "check:release": "npm run check:beta && npm run build && npm run check:beta:runtime"
   }
