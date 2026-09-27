@@ -1,5 +1,7 @@
 # Lipit Capture
 
+[![Windows release build](https://github.com/duhapolat/lipit-capture/actions/workflows/windows-release.yml/badge.svg)](https://github.com/duhapolat/lipit-capture/actions/workflows/windows-release.yml)
+
 Kullanıcının erişim ve indirme hakkına sahip olduğu ( öncelikle Twitter, Instagram, YouTube ) DRM korumasız medyaları yerel olarak indirmek ve klip oluşturmak için tasarlanan masaüstü uygulaması.
 
 ## Sürüm 1.0 beta 1
