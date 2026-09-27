@@ -1,0 +1,28 @@
+{
+  "name": "lipit-capture",
+  "version": "1.0.0-beta.1",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/run.mjs dev",
+    "build": "node scripts/run.mjs build",
+    "build:extension": "node apps/extension/scripts/build.mjs",
+    "install:bridge": "node scripts/install-native-host.mjs",
+    "check:ui": "npm --prefix apps/desktop run build",
+    "check:extension": "node apps/extension/scripts/build.mjs",
+    "test:native": "node scripts/test-native-host.mjs",
+    "test:resolve-ui": "node scripts/test-resolve-ui.mjs",
+    "test:widget": "node scripts/test-quick-widget.mjs",
+    "test:pipeline": "node scripts/test-media-pipeline.mjs",
+    "test:extension": "node apps/extension/scripts/build.mjs && node apps/extension/scripts/test-candidate-store.mjs",
+    "test:rust": "node scripts/test-rust.mjs",
+    "check:rust": "node scripts/check-rust-lints.mjs",
+    "check:security": "node scripts/security-check.mjs",
+    "licenses:generate": "node scripts/generate-third-party-licenses.mjs",
+    "bundle:windows": "node scripts/bundle-windows.mjs",
+    "package:windows": "node scripts/bundle-windows.mjs --package-only",
+    "check:beta": "npm run check:security && npm --prefix apps/desktop audit && npm run test:rust && npm run check:rust && npm run test:extension && npm run check:ui",
+    "check:beta:runtime": "npm run test:native && npm run test:widget && npm run test:resolve-ui && npm run test:pipeline",
+    "check:release": "npm run check:beta && npm run build && npm run check:beta:runtime"
+  }
+}

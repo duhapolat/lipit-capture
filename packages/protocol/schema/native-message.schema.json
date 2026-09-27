@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lipit.local/schemas/native-message-v1.json",
+  "title": "Lipit Native Messaging Protocol v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "type", "action", "candidate"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "type": { "const": "MEDIA_DETECTED" },
+        "action": { "enum": ["download", "clip"] },
+        "candidate": { "$ref": "#/$defs/mediaCandidate" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "type"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "type": { "const": "PING" }
+      }
+    }
+  ],
+  "$defs": {
+    "mediaCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tabId", "pageUrl", "source", "protocol"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tabId": { "type": "integer", "minimum": 0 },
+        "pageUrl": { "type": "string", "format": "uri", "maxLength": 4096 },
+        "pageTitle": { "type": "string", "maxLength": 512 },
+        "mediaUrl": { "type": "string", "format": "uri", "maxLength": 8192 },
+        "source": { "enum": ["dom", "network", "extractor"] },
+        "protocol": { "enum": ["http", "hls", "dash", "blob", "unknown"] },
+        "mimeType": { "type": "string", "maxLength": 128 },
+        "width": { "type": "integer", "minimum": 0, "maximum": 32768 },
+        "height": { "type": "integer", "minimum": 0, "maximum": 32768 },
+        "fps": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "currentTimeMs": { "type": "integer", "minimum": 0 },
+        "referer": { "type": "string", "format": "uri", "maxLength": 4096 },
+        "origin": { "type": "string", "maxLength": 512 },
+        "userAgent": { "type": "string", "maxLength": 1024 },
+        "drm": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+node_modules/
+dist/
+target/
+.toolchain/
+.downloads/
+native/binaries/*.exe
+apps/desktop/src-tauri/binaries/*.exe
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/resources/
+*.log
+
+# Local secrets and signed extension artifacts
+*.pem
+*.key
+*.pfx
+*.p12
+/release/
+apps/extension/dist.crx
+
+# Local environment files
+.env
+.env.*
+!.env.example
