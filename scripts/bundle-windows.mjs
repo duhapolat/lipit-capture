@@ -37,6 +37,14 @@ function run(args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function rustHostTriple() {
+  const rustc = existsSync(join(cargoHome, "bin", "rustc.exe"))
+    ? join(cargoHome, "bin", "rustc.exe")
+    : "rustc";
+  const result = spawnSync(rustc, ["-vV"], { env, encoding: "utf8" });
+  return result.stdout?.match(/^host:\s*(\S+)/m)?.[1] ?? "";
+}
+
 function stageResources(allowPlaceholder) {
   rmSync(resources, { recursive: true, force: true });
   mkdirSync(join(resources, "extension"), { recursive: true });
@@ -51,10 +59,11 @@ function stageResources(allowPlaceholder) {
     throw new Error("Native Messaging host was not produced by the release build.");
   }
   const webViewLoader = join(tauri, "target", "release", "WebView2Loader.dll");
-  if (!existsSync(webViewLoader)) {
+  if (existsSync(webViewLoader)) {
+    copyFileSync(webViewLoader, join(resources, "WebView2Loader.dll"));
+  } else if (rustHostTriple().endsWith("-gnu")) {
     throw new Error("WebView2Loader.dll was not produced by the release build.");
   }
-  copyFileSync(webViewLoader, join(resources, "WebView2Loader.dll"));
   const extension = join(root, "apps", "extension", "dist");
   if (existsSync(extension)) {
     cpSync(extension, join(resources, "extension"), { recursive: true });
