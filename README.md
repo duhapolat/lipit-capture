@@ -64,8 +64,10 @@ DRM korumalı içerikleri çözmeye veya indirmeye çalışmaz. Çıktı kalites
 
 Arayüz için ertelenen son düzenleme maddeleri [docs/polish-backlog.md](docs/polish-backlog.md) dosyasında tutulur.
 
-## Lisans ve kod imzası
+## Lisans
 
 Copyright © 2026 Muhammed Duha Polat. Lipit Capture, [GNU GPL sürüm 3 veya sonrası](LICENSE) ile lisanslanır. Birlikte dağıtılan üçüncü taraf araçların koşulları [üçüncü taraf bildirimlerinde](THIRD_PARTY_NOTICES.md) ve [lisans envanterinde](licenses/DEPENDENCY_LICENSES.txt) bulunur.
 
-Windows açık kaynak sürümleri SignPath Foundation üzerinden imzalanacaktır. Ayrıntılar [kod imzalama politikasında](docs/code-signing-policy.md) açıklanır. İmzasız yerel setup adayı `npm run bundle:windows` ile üretilir; herkese açık sürüm olarak yalnızca SignPath tarafından imzalanmış setup yayımlanır.
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). Roller, imzalama akışı ve gizlilik bilgileri [Lipit code signing policy](docs/code-signing-policy.md) belgesinde açıklanır. İmzasız yerel setup adayı `npm run bundle:windows` ile üretilir; SignPath katılımı tamamlandıktan sonraki herkese açık Windows sürümleri doğrulanmış GitHub Actions çıktısından imzalanacaktır.
