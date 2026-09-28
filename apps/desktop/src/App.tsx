@@ -958,7 +958,7 @@ function MainApp() {
 
   async function copyDiagnostics() {
     const diagnostics = {
-      lipitVersion: "1.0.0-beta.1",
+      lipitVersion: "1.0.0-beta.2",
       platform: navigator.platform,
       engines: engines
         ? {

@@ -1,6 +1,6 @@
 [package]
 name = "lipit-desktop"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 description = "Local media capture and download desktop app"
 authors = ["Muhammed Duha Polat"]
 license = "GPL-3.0-or-later"
