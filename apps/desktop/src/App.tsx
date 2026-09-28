@@ -34,6 +34,12 @@ import {
 } from "lucide-react";
 import "./App.css";
 
+const LIPIT_VERSION = __LIPIT_VERSION__;
+const versionParts = LIPIT_VERSION.match(/^(\d+\.\d+)\.0-beta\.(\d+)$/);
+const LIPIT_DISPLAY_VERSION = versionParts
+  ? `${versionParts[1]} BETA ${versionParts[2]}`
+  : LIPIT_VERSION.toUpperCase();
+
 type AppError = { code: string; message: string };
 type QualityProfile = {
   height: number | null;
@@ -958,7 +964,7 @@ function MainApp() {
 
   async function copyDiagnostics() {
     const diagnostics = {
-      lipitVersion: "1.0.0-beta.2",
+      lipitVersion: LIPIT_VERSION,
       platform: navigator.platform,
       engines: engines
         ? {
@@ -1164,7 +1170,7 @@ function MainApp() {
           </span>
           <span className="brand-word">Lipit</span>
           <em>STUDIO</em>
-          <small className="brand-version">1.0 BETA 1</small>
+          <small className="brand-version">{LIPIT_DISPLAY_VERSION}</small>
         </div>
         <div className="topbar-right">
           <div className="engine-popover-wrap">
@@ -1256,7 +1262,7 @@ function MainApp() {
           >
             <Keyboard size={15} /> Kısayollar
           </button>
-          <span className="phase-pill">1.0 BETA 1</span>
+          <span className="phase-pill">{LIPIT_DISPLAY_VERSION}</span>
           <span className="local-pill">
             <i /> Yerel çalışır
           </span>
@@ -1755,7 +1761,7 @@ function MainApp() {
             <div className="settings-modal-hero">
               <span className="onboarding-mark"><Zap size={22} /></span>
               <div>
-                <span className="settings-kicker">LIPIT 1.0 BETA 1</span>
+                <span className="settings-kicker">LIPIT {LIPIT_DISPLAY_VERSION}</span>
                 <h2 id="onboarding-title">Hızlı profilini hazırlayalım</h2>
                 <p>
                   Video üzerindeki ⚡ düğmeleri bu tercihleri kullanır. Hepsini
@@ -1903,7 +1909,7 @@ function MainApp() {
         </div>
       )}
       <footer className="footer">
-        <span>Lipit Studio · 1.0 beta 1</span>
+        <span>Lipit Studio · {LIPIT_DISPLAY_VERSION.toLowerCase()}</span>
         <span>FFmpeg yerel · Akış çözümleyici hazır · Kayıt kasası etkin</span>
       </footer>
     </div>

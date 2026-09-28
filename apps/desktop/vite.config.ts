@@ -2,10 +2,17 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import process from "node:process";
+import { readFileSync } from "node:fs";
 const host = process.env.TAURI_DEV_HOST;
+const packageVersion = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+).version;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
+  define: {
+    __LIPIT_VERSION__: JSON.stringify(packageVersion),
+  },
   plugins: [react(), tailwindcss()],
   build: {
     rollupOptions: {

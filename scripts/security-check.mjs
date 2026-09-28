@@ -54,6 +54,41 @@ const capability = JSON.parse(await readFile(join(root, "apps", "desktop", "src-
 requireCondition(!capability.permissions.some((permission) => String(permission).startsWith("shell:")), "Frontend must not have shell permissions");
 
 const extension = JSON.parse(await readFile(join(root, "apps", "extension", "manifest.json"), "utf8"));
+const rootPackage = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+const desktopPackage = JSON.parse(
+  await readFile(join(root, "apps", "desktop", "package.json"), "utf8"),
+);
+const extensionPackage = JSON.parse(
+  await readFile(join(root, "apps", "extension", "package.json"), "utf8"),
+);
+const cargoToml = await readFile(
+  join(root, "apps", "desktop", "src-tauri", "Cargo.toml"),
+  "utf8",
+);
+const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+for (const [source, version] of Object.entries({
+  "desktop package": desktopPackage.version,
+  "extension package": extensionPackage.version,
+  "Tauri config": tauri.version,
+  "Cargo package": cargoVersion,
+})) {
+  requireCondition(
+    version === rootPackage.version,
+    `${source} version ${version ?? "missing"} does not match ${rootPackage.version}`,
+  );
+}
+const betaVersion = rootPackage.version.match(/^(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$/);
+requireCondition(Boolean(betaVersion), `Unsupported release version: ${rootPackage.version}`);
+if (betaVersion) {
+  requireCondition(
+    extension.version === betaVersion.slice(1).join("."),
+    "Extension numeric version does not match the release version",
+  );
+  requireCondition(
+    extension.version_name === `${betaVersion[1]}.${betaVersion[2]} beta ${betaVersion[4]}`,
+    "Extension display version does not match the release version",
+  );
+}
 for (const forbidden of ["cookies", "downloads", "history", "clipboardRead", "management"]) {
   requireCondition(!extension.permissions.includes(forbidden), `Extension must not request ${forbidden}`);
 }

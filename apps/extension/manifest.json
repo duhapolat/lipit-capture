@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Lipit Capture",
-  "version": "1.0.0",
-  "version_name": "1.0 beta 1",
+  "version": "1.0.0.3",
+  "version_name": "1.0 beta 3",
   "description": "Sayfa ve ağ trafiğindeki DRM korumasız medya kaynaklarını Lipit'e gönderir.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtGZzYD21z6bARlf5Iv6d1k/b/hZmmoO5A+KgsOqvQe7FsJITwzrgM0JpyVp4PSpopkiFiRT9//KtV4Cke1c8tmnoAEyz3FrbuBN5OUXVWAD3YCpyV10qMYt9p1KbIyJnGW+SZ4n6fTbCUlFrRYm3/hXq1ItQKE+SBmSdUFWtYuGcnMN2CtXHNcD2Jb5PikFrgkENclSRJnG4CyvIL4giOWmJxEA1KJibkc4g9F90zPbBLkvYC/ZGhDHc93vTBqaCYHz5rZGuVpfiiGz5iN9pOOxsA2Bb6Q3GB1NxqhThK86nqG0lg+d6umA9yWZ7VFDxLer21YZ0D+siDm0CKfIlkwIDAQAB",
   "permissions": ["nativeMessaging", "storage", "webRequest"],

@@ -10,9 +10,19 @@ const chromiumContent = await readFile(
   new URL("../dist/content.js", import.meta.url),
   "utf8",
 );
+const extensionPackage = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8"),
+);
+const versionMatch = extensionPackage.version.match(
+  /^(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$/,
+);
+assert.ok(versionMatch);
 
-assert.equal(chromiumManifest.version, "1.0.0");
-assert.equal(chromiumManifest.version_name, "1.0 beta 1");
+assert.equal(chromiumManifest.version, versionMatch.slice(1).join("."));
+assert.equal(
+  chromiumManifest.version_name,
+  `${versionMatch[1]}.${versionMatch[2]} beta ${versionMatch[4]}`,
+);
 assert.equal(chromiumManifest.background.service_worker, "background.js");
 assert.match(chromiumContent, /aria-label="Hızlı profile göre indir"/);
 assert.match(chromiumContent, /aria-label="Hızlı profile göre klip al"/);
