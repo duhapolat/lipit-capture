@@ -289,70 +289,79 @@ impl JobManager {
             .map_err(|_| AppError::new("TEMP_UNAVAILABLE", "Geçici klasör oluşturulamadı."))?;
         self.update(app, id, |job| job.status = JobStatus::Resolving);
         let mut media = if request.direct {
-            if let Some(refresh_url) = request
-                .refresh_url
-                .as_deref()
-                .filter(|value| *value != request.url)
-            {
-                match media::resolve_with_context(
-                    app,
-                    refresh_url,
-                    &request.request_context,
-                    Some(cancel.clone()),
-                )
-                .await
+            Some(
+                if let Some(refresh_url) = request
+                    .refresh_url
+                    .as_deref()
+                    .filter(|value| *value != request.url)
                 {
-                    Ok(media) => media,
-                    Err(error) if error.code == "CANCELLED" => return Err(error),
-                    Err(_) => media::resolve_direct(
+                    match media::resolve_with_context(
+                        app,
+                        refresh_url,
+                        &request.request_context,
+                        Some(cancel.clone()),
+                    )
+                    .await
+                    {
+                        Ok(media) => media,
+                        Err(error) if error.code == "CANCELLED" => return Err(error),
+                        Err(_) => media::resolve_direct(
+                            &request.url,
+                            request.known_duration_ms,
+                            request.request_context.clone(),
+                        )?,
+                    }
+                } else {
+                    media::resolve_direct(
                         &request.url,
                         request.known_duration_ms,
                         request.request_context.clone(),
-                    )?,
-                }
-            } else {
-                media::resolve_direct(
-                    &request.url,
-                    request.known_duration_ms,
-                    request.request_context.clone(),
-                )?
-            }
-        } else {
-            media::resolve_with_context(
-                app,
-                &request.url,
-                &request.request_context,
-                Some(cancel.clone()),
+                    )?
+                },
             )
-            .await?
+        } else {
+            // The UI/native bridge has already resolved page URLs before a job is
+            // queued. Resolving once more here made every transfer extract the same
+            // page twice before yt-dlp began downloading, which needlessly caused
+            // rate limits. yt-dlp performs the one required extraction below.
+            None
         };
-        if media.duration_ms.is_none() {
-            media.duration_ms = request.known_duration_ms;
-        }
-        if clip.is_none() && media.is_live {
-            return Err(AppError::new(
-                "LIVE_DOWNLOAD_REQUIRES_CLIP",
-                "Canlı yayınlarda tamamını indirmek yerine süreli bir klip oluşturun.",
-            ));
+        if let Some(media) = media.as_mut() {
+            if media.duration_ms.is_none() {
+                media.duration_ms = request.known_duration_ms;
+            }
+            if clip.is_none() && media.is_live {
+                return Err(AppError::new(
+                    "LIVE_DOWNLOAD_REQUIRES_CLIP",
+                    "Canlı yayınlarda tamamını indirmek yerine süreli bir klip oluşturun.",
+                ));
+            }
+            if !media.direct
+                && !media
+                    .profiles
+                    .iter()
+                    .any(|profile| profile.height == request.quality_height)
+            {
+                return Err(AppError::new(
+                    "INVALID_QUALITY",
+                    "Seçilen kalite artık mevcut değil.",
+                ));
+            }
         }
         if let Some(clip) = clip {
-            clip.validate(media.duration_ms)?;
-        }
-        if !media
-            .profiles
-            .iter()
-            .any(|p| p.height == request.quality_height)
-        {
-            return Err(AppError::new(
-                "INVALID_QUALITY",
-                "Seçilen kalite artık mevcut değil.",
-            ));
+            clip.validate(
+                media
+                    .as_ref()
+                    .and_then(|item| item.duration_ms)
+                    .or(request.known_duration_ms),
+            )?;
         }
         if *cancel.borrow() {
             return Err(AppError::new("CANCELLED", "İşlem iptal edildi."));
         }
         self.update(app, id, |job| job.status = JobStatus::Downloading);
-        if media.direct {
+        if media.as_ref().is_some_and(|item| item.direct) {
+            let media = media.as_ref().expect("direct source checked above");
             let target = job_dir.join("media.mp4");
             if clip.is_some_and(|value| matches!(value.mode, ClipMode::Precise)) {
                 self.update(app, id, |job| job.status = JobStatus::Encoding);
@@ -406,7 +415,11 @@ impl JobManager {
                     ffmpeg_dir.to_string_lossy().into_owned(),
                 ]);
             }
-            args.extend(["--".into(), request.url.clone()]);
+            let source_url = media
+                .as_ref()
+                .map(|item| item.url.clone())
+                .unwrap_or_else(|| request.url.clone());
+            args.extend(["--".into(), source_url]);
             let manager = self.clone();
             let app_for_progress = app.clone();
             let id_for_progress = id.to_owned();

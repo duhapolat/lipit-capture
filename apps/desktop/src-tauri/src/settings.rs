@@ -214,6 +214,7 @@ pub fn yt_dlp_args(app: &AppHandle, context: &RequestContext) -> Result<Vec<Stri
     validate_request_context(context)?;
     let settings = load(app)?;
     let mut args = request_header_args(context);
+    args.extend(rate_limit_args());
     if settings.compatibility.cookies_enabled {
         args.extend([
             "--cookies-from-browser".into(),
@@ -240,6 +241,25 @@ pub fn yt_dlp_args(app: &AppHandle, context: &RequestContext) -> Result<Vec<Stri
         ]);
     }
     Ok(args)
+}
+
+fn rate_limit_args() -> Vec<String> {
+    vec![
+        "--sleep-requests".into(),
+        "0.75".into(),
+        "--retries".into(),
+        "5".into(),
+        "--fragment-retries".into(),
+        "5".into(),
+        "--extractor-retries".into(),
+        "3".into(),
+        "--retry-sleep".into(),
+        "http:exp=1:8".into(),
+        "--retry-sleep".into(),
+        "extractor:exp=1:8".into(),
+        "--retry-sleep".into(),
+        "fragment:exp=1:4".into(),
+    ]
 }
 
 pub fn ffmpeg_input_args(context: &RequestContext) -> Result<Vec<String>, AppError> {
@@ -345,6 +365,19 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["-headers", "Origin: https://example.com\r\n"]));
+    }
+
+    #[test]
+    fn rate_limit_policy_backs_off_without_unbounded_retries() {
+        let args = rate_limit_args();
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--sleep-requests", "0.75"]));
+        assert!(args.windows(2).any(|pair| pair == ["--retries", "5"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--retry-sleep", "http:exp=1:8"]));
+        assert!(!args.iter().any(|value| value == "infinite"));
     }
 
     #[test]
