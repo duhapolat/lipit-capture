@@ -120,6 +120,11 @@ type EngineUpdateResult = {
   currentVersion: string;
   updated: boolean;
 };
+type NativeBridgeRepairResult = {
+  hostPath: string;
+  manifestPath: string;
+  browsersRegistered: number;
+};
 type HistoryEntry = {
   id: string;
   kind: "download" | "clip";
@@ -305,6 +310,8 @@ type ProfileSettingsProps = {
   onChooseDirectory: () => void;
   showAdvanced: boolean;
   pluginDirectory?: string;
+  onRepairNativeBridge?: () => void;
+  bridgeRepairing?: boolean;
 };
 
 function ProfileSettings({
@@ -313,6 +320,8 @@ function ProfileSettings({
   onChooseDirectory,
   showAdvanced,
   pluginDirectory,
+  onRepairNativeBridge,
+  bridgeRepairing = false,
 }: ProfileSettingsProps) {
   const updateQuickProfile = (changes: Partial<AppSettings["quickProfile"]>) =>
     onChange({
@@ -504,6 +513,19 @@ function ProfileSettings({
             Uzantı çerez göndermez. Bu seçenek yalnız seçilen tarayıcının yerel
             oturumunu işlem sırasında kullanır.
           </p>
+          {onRepairNativeBridge && (
+            <button
+              className="settings-repair-button"
+              type="button"
+              onClick={onRepairNativeBridge}
+              disabled={bridgeRepairing}
+            >
+              <RefreshCw className={bridgeRepairing ? "spin" : ""} size={15} />
+              {bridgeRepairing
+                ? "Tarayıcı bağlantısı onarılıyor"
+                : "Tarayıcı bağlantısını onar"}
+            </button>
+          )}
         </section>
       )}
     </div>
@@ -630,6 +652,7 @@ function MainApp() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [engineUpdating, setEngineUpdating] = useState(false);
+  const [bridgeRepairing, setBridgeRepairing] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [preview, setPreview] = useState<{ entry: HistoryEntry; source: string } | null>(null);
@@ -994,6 +1017,22 @@ function MainApp() {
       setSettingsMessage("Tanılama bilgisi kopyalandı. Bağlantılar ve dosya yolları dahil edilmedi.");
     } catch {
       setError("Tanılama bilgisi panoya kopyalanamadı.");
+    }
+  }
+
+  async function repairNativeBridge() {
+    setBridgeRepairing(true);
+    setSettingsMessage(null);
+    setError(null);
+    try {
+      const result = await invoke<NativeBridgeRepairResult>("repair_native_bridge");
+      setSettingsMessage(
+        `Tarayıcı bağlantısı ${result.browsersRegistered} tarayıcı için yenilendi. Tarayıcıyı tamamen kapatıp yeniden açın.`,
+      );
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBridgeRepairing(false);
     }
   }
 
@@ -1823,6 +1862,8 @@ function MainApp() {
                 onChooseDirectory={() => void chooseDownloadDirectory()}
                 showAdvanced
                 pluginDirectory={engines?.poTokenPluginsDir}
+                onRepairNativeBridge={() => void repairNativeBridge()}
+                bridgeRepairing={bridgeRepairing}
               />
               {settingsMessage && <p className="settings-message">{settingsMessage}</p>}
               {error && <p className="settings-inline-error">{error}</p>}

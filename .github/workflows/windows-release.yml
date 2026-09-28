@@ -7,7 +7,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-release-${{ github.ref }}
@@ -45,11 +45,23 @@ jobs:
       - name: Fetch verified media engines
         run: node scripts/prepare-binaries.mjs x86_64-pc-windows-msvc
 
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $version"
+          }
+
       - name: Run deterministic beta checks
         run: npm run check:beta
 
       - name: Build application and native host
         run: npm run build
+
+      - name: Verify native messaging host binary
+        run: npm run test:native
 
       - name: Package unsigned NSIS setup
         run: npm run package:windows
@@ -63,3 +75,36 @@ jobs:
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish GitHub prerelease
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $setup = Get-ChildItem release/Lipit-Capture-*-Windows-x64-unsigned-setup.exe | Select-Object -First 1
+          $notes = @"
+          ## Değişiklikler
+
+          - Chromium masaüstü bağlantısı için uygulama içi doğrulama ve onarım eklendi.
+          - Native Messaging hostu kurulumdan sonra gerçek PING mesajıyla sınanıyor.
+          - Chrome, Edge ve Brave kullanıcı kayıtları uygulama içinden yenilenebiliyor.
+          - Geçici medya kaynağı sınırlarında gereksiz çözümleme istekleri azaltıldı.
+          - Masaüstü ve uzantı sürüm etiketleri tek sürüm kaynağıyla eşitlendi.
+
+          ## Kurulum
+
+          Bu beta setup henüz kod imzalı değildir. Windows SmartScreen uyarı gösterebilir.
+
+          ## Code signing policy
+
+          Projenin kod imzalama ilkesi: https://github.com/duhapolat/lipit-capture/blob/main/docs/code-signing-policy.md
+          "@
+          $notes | Set-Content release/release-notes.md -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME `
+            $setup.FullName `
+            release/SHA256SUMS.txt `
+            --title "Lipit Capture $env:GITHUB_REF_NAME" `
+            --notes-file release/release-notes.md `
+            --prerelease `
+            --verify-tag

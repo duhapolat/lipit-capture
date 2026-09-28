@@ -125,6 +125,11 @@ fn drain_detected_candidates() -> Result<Vec<native_messaging::StoredCandidate>,
 }
 
 #[tauri::command]
+fn repair_native_bridge() -> Result<native_messaging::NativeBridgeRepairResult, AppError> {
+    native_messaging::repair_chromium_registration()
+}
+
+#[tauri::command]
 async fn start_download(
     app: AppHandle,
     manager: State<'_, JobManager>,
@@ -309,6 +314,7 @@ pub fn run() {
             resolve_detected_candidate,
             cancel_resolution,
             drain_detected_candidates,
+            repair_native_bridge,
             start_download,
             start_clip,
             cancel_download,

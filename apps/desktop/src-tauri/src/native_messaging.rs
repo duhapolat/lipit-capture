@@ -4,7 +4,8 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,26 @@ pub const PROTOCOL_VERSION: u16 = 1;
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 const MAX_STORED_CANDIDATE_BYTES: u64 = 256 * 1024;
 const APP_IDENTIFIER: &str = "com.lipit.capture";
+const NATIVE_HOST_NAME: &str = "com.lipit.capture";
+const EXTENSION_ID: &str = "nhcgifoaikjkndkbnkkllknmlfbkdcbc";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeBridgeRepairResult {
+    pub host_path: String,
+    pub manifest_path: String,
+    pub browsers_registered: usize,
+}
+
+#[derive(Serialize)]
+struct NativeHostManifest {
+    name: &'static str,
+    description: &'static str,
+    path: String,
+    #[serde(rename = "type")]
+    host_type: &'static str,
+    allowed_origins: Vec<String>,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -268,6 +289,198 @@ pub fn cleanup_stale_files() {
             let _ = fs::remove_file(path);
         }
     }
+}
+
+#[cfg(windows)]
+pub fn repair_chromium_registration() -> Result<NativeBridgeRepairResult, AppError> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let desktop = env::current_exe().map_err(|_| {
+        AppError::new(
+            "NATIVE_BRIDGE_REPAIR_FAILED",
+            "Uygulama konumu belirlenemedi.",
+        )
+    })?;
+    let install_dir = desktop.parent().ok_or_else(|| {
+        AppError::new(
+            "NATIVE_BRIDGE_REPAIR_FAILED",
+            "Uygulama klasörü bulunamadı.",
+        )
+    })?;
+    let host = install_dir.join("lipit-native-host.exe");
+    if !host.is_file() {
+        return Err(AppError::new(
+            "NATIVE_BRIDGE_REPAIR_FAILED",
+            "Masaüstü bağlantı bileşeni kurulum klasöründe bulunamadı. Lipit kurulumunu yeniden çalıştırın.",
+        ));
+    }
+    verify_native_host(&host)?;
+    let local_data = env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            AppError::new(
+                "NATIVE_BRIDGE_REPAIR_FAILED",
+                "Windows kullanıcı veri klasörü bulunamadı.",
+            )
+        })?;
+    let manifest_dir = local_data
+        .join("Lipit Capture")
+        .join("NativeMessaging")
+        .join("chromium");
+    fs::create_dir_all(&manifest_dir).map_err(|_| {
+        AppError::new(
+            "NATIVE_BRIDGE_REPAIR_FAILED",
+            "Tarayıcı bağlantı klasörü oluşturulamadı.",
+        )
+    })?;
+    let manifest_path = manifest_dir.join(format!("{NATIVE_HOST_NAME}.json"));
+    let manifest = NativeHostManifest {
+        name: NATIVE_HOST_NAME,
+        description: "Lipit Capture native messaging bridge",
+        path: host.to_string_lossy().into_owned(),
+        host_type: "stdio",
+        allowed_origins: vec![format!("chrome-extension://{EXTENSION_ID}/")],
+    };
+    let mut bytes = serde_json::to_vec_pretty(&manifest).map_err(|_| {
+        AppError::new(
+            "NATIVE_BRIDGE_REPAIR_FAILED",
+            "Tarayıcı bağlantı kaydı hazırlanamadı.",
+        )
+    })?;
+    bytes.push(b'\n');
+    fs::write(&manifest_path, bytes).map_err(|_| {
+        AppError::new(
+            "NATIVE_BRIDGE_REPAIR_FAILED",
+            "Tarayıcı bağlantı dosyası yazılamadı.",
+        )
+    })?;
+
+    let registry_roots = [
+        r"HKCU\Software\Google\Chrome\NativeMessagingHosts",
+        r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts",
+        r"HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
+    ];
+    for root in registry_roots {
+        let key = format!(r"{root}\{NATIVE_HOST_NAME}");
+        let status = Command::new("reg.exe")
+            .args([
+                "add",
+                &key,
+                "/ve",
+                "/t",
+                "REG_SZ",
+                "/d",
+                &manifest_path.to_string_lossy(),
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map_err(|_| {
+                AppError::new(
+                    "NATIVE_BRIDGE_REPAIR_FAILED",
+                    "Windows tarayıcı kaydı çalıştırılamadı.",
+                )
+            })?;
+        if !status.success() {
+            return Err(AppError::new(
+                "NATIVE_BRIDGE_REPAIR_FAILED",
+                "Windows tarayıcı kaydı güncellenemedi.",
+            ));
+        }
+    }
+
+    Ok(NativeBridgeRepairResult {
+        host_path: host.to_string_lossy().into_owned(),
+        manifest_path: manifest_path.to_string_lossy().into_owned(),
+        browsers_registered: registry_roots.len(),
+    })
+}
+
+#[cfg(windows)]
+fn verify_native_host(host: &Path) -> Result<(), AppError> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let payload = br#"{"protocolVersion":1,"type":"PING"}"#;
+    let mut packet = Vec::with_capacity(payload.len() + 4);
+    packet.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    packet.extend_from_slice(payload);
+    let mut child = Command::new(host)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|_| {
+            AppError::new(
+                "NATIVE_BRIDGE_HOST_FAILED",
+                "Masaüstü bağlantı bileşeni başlatılamadı. Kurulumu yeniden çalıştırın.",
+            )
+        })?;
+    let write_result = child
+        .stdin
+        .take()
+        .ok_or(())
+        .and_then(|mut input| input.write_all(&packet).map_err(|_| ()));
+    if write_result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(AppError::new(
+            "NATIVE_BRIDGE_HOST_FAILED",
+            "Masaüstü bağlantı bileşenine test mesajı gönderilemedi.",
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(AppError::new(
+                    "NATIVE_BRIDGE_HOST_FAILED",
+                    "Masaüstü bağlantı bileşeni test mesajına yanıt vermedi.",
+                ));
+            }
+        }
+    };
+    let mut response = Vec::new();
+    if let Some(mut output) = child.stdout.take() {
+        let _ = output.read_to_end(&mut response);
+    }
+    if !status.success() || response.len() < 4 {
+        return Err(AppError::new(
+            "NATIVE_BRIDGE_HOST_FAILED",
+            "Masaüstü bağlantı bileşeni çalışırken kapandı. Kurulumu yeniden çalıştırın.",
+        ));
+    }
+    let response_size = u32::from_le_bytes(response[..4].try_into().unwrap_or_default()) as usize;
+    let message: serde_json::Value = response
+        .get(4..4 + response_size)
+        .and_then(|bytes| serde_json::from_slice(bytes).ok())
+        .ok_or_else(|| {
+            AppError::new(
+                "NATIVE_BRIDGE_HOST_FAILED",
+                "Masaüstü bağlantı bileşeni geçersiz yanıt verdi.",
+            )
+        })?;
+    if message.get("type").and_then(serde_json::Value::as_str) != Some("PONG") {
+        return Err(AppError::new(
+            "NATIVE_BRIDGE_HOST_FAILED",
+            "Masaüstü bağlantı bileşeni test mesajını doğrulamadı.",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn repair_chromium_registration() -> Result<NativeBridgeRepairResult, AppError> {
+    Err(AppError::new(
+        "NATIVE_BRIDGE_REPAIR_FAILED",
+        "Tarayıcı bağlantısı yalnız Windows üzerinde kullanılabilir.",
+    ))
 }
 
 fn read_candidate_file(path: &Path) -> Result<StoredCandidate, AppError> {

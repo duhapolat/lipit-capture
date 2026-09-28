@@ -835,6 +835,25 @@ button:disabled {
   font-size: 10px;
   font-weight: 700;
 }
+.settings-repair-button {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 12px;
+  border: 1px solid #405348;
+  border-radius: 8px;
+  background: #17231d;
+  color: #a9e8c5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.settings-repair-button:hover:not(:disabled) {
+  border-color: #77bd91;
+  color: #d8ffe7;
+}
 .engine-update-button {
   margin-top: 13px;
 }
