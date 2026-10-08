@@ -7,11 +7,13 @@ import {
   ArrowDownToLine,
   Check,
   CircleAlert,
+  Clock3,
   Clipboard,
   Clapperboard,
   Cookie,
   Cpu,
   Film,
+  FileVideo,
   FolderOpen,
   Globe2,
   History as HistoryIcon,
@@ -26,15 +28,14 @@ import {
   ShieldCheck,
   Scissors,
   Square,
-  Target,
   Trash2,
-  WandSparkles,
   X,
   Zap,
 } from "lucide-react";
 import "./App.css";
 
 const LIPIT_VERSION = __LIPIT_VERSION__;
+const RUNNING_IN_TAURI = "__TAURI_INTERNALS__" in window;
 const versionParts = LIPIT_VERSION.match(/^(\d+\.\d+)\.0-beta\.(\d+)$/);
 const LIPIT_DISPLAY_VERSION = versionParts
   ? `${versionParts[1]} BETA ${versionParts[2]}`
@@ -208,8 +209,58 @@ const timecode = (ms: number) => {
   const minutes = Math.floor((safe % 3600000) / 60000);
   const seconds = Math.floor((safe % 60000) / 1000);
   const milliseconds = safe % 1000;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(milliseconds).padStart(3, "0")}`;
 };
+const parseTimecode = (value: string): number | null => {
+  const match = value.trim().match(/^(\d{1,4}):([0-5]?\d):([0-5]?\d):(\d{1,3})$/);
+  if (!match) return null;
+  const [, hours, minutes, seconds, milliseconds] = match;
+  return (
+    Number(hours) * 3_600_000 +
+    Number(minutes) * 60_000 +
+    Number(seconds) * 1_000 +
+    Number(milliseconds)
+  );
+};
+type TimecodeInputProps = {
+  value: number;
+  onCommit: (value: number) => void;
+  label: string;
+};
+function TimecodeInput({ value, onCommit, label }: TimecodeInputProps) {
+  const [draft, setDraft] = useState(() => timecode(value));
+
+  useEffect(() => setDraft(timecode(value)), [value]);
+
+  const commit = () => {
+    const parsed = parseTimecode(draft);
+    if (parsed == null) {
+      setDraft(timecode(value));
+      return;
+    }
+    onCommit(parsed);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      spellCheck={false}
+      value={draft}
+      placeholder="00:00:00:000"
+      aria-label={`${label}, saat:dakika:saniye:milisaniye`}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          setDraft(timecode(value));
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
 const fileSize = (bytes: number) => {
   if (bytes < 1024 * 1024) return `${Math.max(1, bytes / 1024).toFixed(0)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1048576).toFixed(1)} MB`;
@@ -302,6 +353,36 @@ const defaultSettings: AppSettings = {
     remoteEjsEnabled: false,
     poTokenProvidersEnabled: false,
   },
+};
+
+const DESIGN_PREVIEW =
+  import.meta.env.DEV &&
+  new URLSearchParams(window.location.search).has("design-preview");
+const DESIGN_PREVIEW_THUMBNAIL = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+    <defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#17222d"/><stop offset="1" stop-color="#3b2018"/></linearGradient></defs>
+    <rect width="640" height="360" fill="url(#g)"/><rect x="28" y="28" width="584" height="304" rx="16" fill="#111820" stroke="#ff7a45" stroke-opacity=".38"/>
+    <circle cx="320" cy="170" r="48" fill="#ff7a45" fill-opacity=".92"/><path d="M305 142 350 170 305 198Z" fill="#16100d"/>
+    <text x="320" y="270" fill="#f4f6f8" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="30" font-weight="700">Lipit Studio</text>
+  </svg>
+`)}`;
+const DESIGN_PREVIEW_MEDIA: ResolvedMedia = {
+  url: "https://www.youtube.com/watch?v=preview",
+  title: "Windows 11 Sandım! Meğer Linux 11’miş",
+  uploader: "Sefer Döngel",
+  durationMs: 1_210_000,
+  thumbnail: DESIGN_PREVIEW_THUMBNAIL,
+  profiles: [
+    { height: null, label: "En iyi kalite", fps: 60 },
+    { height: 1080, label: "1080p (Full HD)", fps: 60 },
+    { height: 720, label: "720p", fps: 60 },
+    { height: 480, label: "480p", fps: 30 },
+  ],
+  drm: false,
+  direct: false,
+  isLive: false,
+  refreshUrl: null,
+  requestContext: { referer: null, origin: null, userAgent: null },
 };
 
 type ProfileSettingsProps = {
@@ -633,9 +714,11 @@ function QuickWidget({ jobId }: { jobId: string }) {
 function MainApp() {
   const urlInputRef = useRef<HTMLInputElement>(null);
   const urlFormRef = useRef<HTMLFormElement>(null);
-  const [url, setUrl] = useState("");
-  const [media, setMedia] = useState<ResolvedMedia | null>(null);
-  const [height, setHeight] = useState<number | null>(null);
+  const [url, setUrl] = useState(DESIGN_PREVIEW ? DESIGN_PREVIEW_MEDIA.url : "");
+  const [media, setMedia] = useState<ResolvedMedia | null>(
+    DESIGN_PREVIEW ? DESIGN_PREVIEW_MEDIA : null,
+  );
+  const [height, setHeight] = useState<number | null>(DESIGN_PREVIEW ? 1080 : null);
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const [engines, setEngines] = useState<EngineVersions | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -644,8 +727,8 @@ function MainApp() {
   const [captured, setCaptured] = useState<StoredCandidate | null>(null);
   const [detected, setDetected] = useState<StoredCandidate[]>([]);
   const [clipMode, setClipMode] = useState<ClipMode>("fast");
-  const [startMs, setStartMs] = useState(0);
-  const [endMs, setEndMs] = useState(30_000);
+  const [startMs, setStartMs] = useState(DESIGN_PREVIEW ? 30_000 : 0);
+  const [endMs, setEndMs] = useState(DESIGN_PREVIEW ? 60_000 : 30_000);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsDraft, setSettingsDraft] = useState<AppSettings>(defaultSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -658,6 +741,7 @@ function MainApp() {
   const [preview, setPreview] = useState<{ entry: HistoryEntry; source: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
   const [enginePanelOpen, setEnginePanelOpen] = useState(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -847,7 +931,7 @@ function MainApp() {
         }
       })
       .catch(() => {
-        if (alive) setOnboardingOpen(true);
+        if (alive) setOnboardingOpen(RUNNING_IN_TAURI);
       });
     invoke<DownloadJob[]>("list_jobs")
       .then((result) => {
@@ -1160,6 +1244,7 @@ function MainApp() {
         setShortcutsOpen(false);
         setSettingsOpen(false);
         setEnginePanelOpen(false);
+        setWorkspacePanelOpen(false);
         setError(null);
         return;
       }
@@ -1185,6 +1270,11 @@ function MainApp() {
   const clipLength = Math.max(0, endMs - startMs);
   const selectionLeft = timelineMax ? (startMs / timelineMax) * 100 : 0;
   const selectionWidth = timelineMax ? (clipLength / timelineMax) * 100 : 0;
+  const activeJobs = jobs.filter((job) => active(job.status));
+  const outputLocation =
+    settings.quickProfile.destinationMode === "folder"
+      ? settings.quickProfile.downloadDirectory || "Klasör seçilmedi"
+      : "Her kayıtta sor";
 
   function updateStart(next: number) {
     setStartMs(Math.max(0, Math.min(Math.round(next), endMs - 100)));
@@ -1301,495 +1391,378 @@ function MainApp() {
           >
             <Keyboard size={15} /> Kısayollar
           </button>
-          <span className="phase-pill">{LIPIT_DISPLAY_VERSION}</span>
           <span className="local-pill">
-            <i /> Yerel çalışır
+            <i /> Yerel çalışıyor
           </span>
+          <button
+            className="topbar-action workspace-panel-toggle"
+            type="button"
+            onClick={() => setWorkspacePanelOpen((current) => !current)}
+            aria-label="Son dosyalar ve işlemler"
+            aria-expanded={workspacePanelOpen}
+          >
+            <ListVideo size={16} /> Panel
+          </button>
         </div>
       </header>
-      <main className="layout">
-        <div className="main-column">
-          <section className="hero">
-            <div className="eyebrow">
-              <WandSparkles size={14} /> ATÖLYE TEZGAHI / YEREL MEDYA MOTORU
-            </div>
-            <h1>
-              Kesim ve Kırpma <span>Atölyesi</span>
-            </h1>
-            <p>
-              Bağlantıyı çözümle, doğru akışı seç, videoyu indir veya kare
-              hassasiyetinde bir klip olarak bilgisayarına kaydet.
-            </p>
-          </section>
-          {captured && (
-            <section className="capture-banner" aria-live="polite">
-              <span className="capture-icon">
-                <Globe2 size={18} />
-              </span>
+      <main className="workspace-layout">
+        <div className="workspace-main">
+          <section className="workflow-section link-step">
+            <div className="workflow-heading">
+              <span className="step-number">1</span>
               <div>
-                <strong>Tarayıcıdan medya yakalandı</strong>
-                <span>
-                  {captured.candidate.pageTitle ||
-                    new URL(captured.candidate.pageUrl).hostname}
-                  {(captured.action === "clip" || captured.action === "quick_clip") &&
-                    ` · Klip noktası ${duration(captured.candidate.currentTimeMs ?? null)}`}
-                  {(captured.action === "quick_download" || captured.action === "quick_clip") &&
-                    " · Hızlı profil"}
-                </span>
+                <h1>Yeni klip</h1>
+                <p>Video bağlantısını ekle, gerisini Lipit hazırlasın.</p>
               </div>
-              <b>{captured.candidate.protocol.toUpperCase()}</b>
-            </section>
-          )}
-          <form ref={urlFormRef} className="url-card" onSubmit={analyze}>
-            <label htmlFor="media-url">
-              <Link2 size={17} /> URL çekici
-            </label>
-            <div className="url-row">
-              <input
-                ref={urlInputRef}
-                id="media-url"
-                type="url"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://ornek-site.com/video"
-                required
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button type="button" onClick={paste} title="Panodan yapıştır">
-                <Clipboard size={18} />
-              </button>
             </div>
-            <div className="url-actions">
-              <span>
-                <ShieldCheck size={15} /> Bağlantı yalnızca cihazında işlenir
-              </span>
+            <form ref={urlFormRef} className="workspace-url-form" onSubmit={analyze}>
+              <div className="workspace-url-input">
+                <Link2 size={19} />
+                <input
+                  ref={urlInputRef}
+                  id="media-url"
+                  type="url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="Video bağlantısını buraya yapıştır"
+                  required
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Video bağlantısı"
+                />
+                {url && (
+                  <button type="button" onClick={() => setUrl("")} aria-label="Bağlantıyı temizle">
+                    <X size={17} />
+                  </button>
+                )}
+                {!url && (
+                  <button type="button" onClick={paste} title="Panodan yapıştır" aria-label="Panodan yapıştır">
+                    <Clipboard size={17} />
+                  </button>
+                )}
+              </div>
               {resolving ? (
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => void cancelResolve()}
-                >
-                  <Square size={16} /> Çözümlemeyi durdur
+                <button className="open-video-button secondary" type="button" onClick={() => void cancelResolve()}>
+                  <Square size={16} /> Durdur
                 </button>
               ) : (
-                <button
-                  className="primary-button"
-                  type="submit"
-                  disabled={!url.trim()}
-                >
-                  <WandSparkles size={18} /> Videoyu çözümle
+                <button className="open-video-button" type="submit" disabled={!url.trim()}>
+                  <Link2 size={18} /> Videoyu getir
                 </button>
               )}
+            </form>
+            <div className="local-processing-note">
+              <ShieldCheck size={14} /> Bağlantı ve medya işlemleri bu cihazda yürütülür.
             </div>
-          </form>
-          {error && (
-            <div className="error-banner" role="alert">
-              <CircleAlert size={19} />
-              <span>{error}</span>
-              <button
-                type="button"
-                onClick={() => setError(null)}
-                aria-label="Kapat"
-              >
-                ×
-              </button>
-            </div>
-          )}
-          {media ? (
-            <section className="media-card">
-              <div className="section-title">
-                <span className="section-icon">
-                  <Film size={18} />
+            {captured && (
+              <div className="browser-capture-note" aria-live="polite">
+                <Globe2 size={16} />
+                <span>
+                  <strong>Tarayıcıdan yakalandı</strong>
+                  {captured.candidate.pageTitle || new URL(captured.candidate.pageUrl).hostname}
                 </span>
-                <div>
-                  <small>MEDYA BULUNDU</small>
-                  <h2>Video ve klip ayarları</h2>
-                </div>
-                <span className="ready-tag">
-                  <Check size={13} /> Hazır
-                </span>
+                <b>{captured.candidate.protocol.toUpperCase()}</b>
               </div>
-              <div className="media-summary">
-                {media.thumbnail ? (
-                  <img
-                    className="thumbnail"
-                    src={media.thumbnail}
-                    alt="Video önizlemesi"
-                  />
-                ) : (
-                  <div className="thumbnail empty-thumb">
-                    <Film size={34} />
-                  </div>
-                )}
-                <div className="media-info">
-                  <h3>{media.title}</h3>
-                  <p>{media.uploader || new URL(media.url).hostname}</p>
-                  <span>{media.isLive ? "Canlı yayın" : duration(media.durationMs)}</span>
-                </div>
+            )}
+            {error && (
+              <div className="error-banner workspace-error" role="alert">
+                <CircleAlert size={18} />
+                <span>{error}</span>
+                <button type="button" onClick={() => setError(null)} aria-label="Kapat"><X size={15} /></button>
               </div>
-              <div className="quality-heading">
-                <h3>Görüntü kalitesi</h3>
-                <span>MP4 · H.264 / AAC tercih edilir</span>
-              </div>
-              <div className="quality-grid">
-                {media.profiles.map((profile) => (
-                  <button
-                    key={profile.height ?? "best"}
-                    className={`quality-option ${height === profile.height ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => setHeight(profile.height)}
-                  >
-                    <span>{profile.label}</span>
-                    {height === profile.height && <Check size={16} />}
-                  </button>
-                ))}
-              </div>
-              <section className="clip-editor" aria-label="Klip zaman aralığı">
-                  <div className="clip-heading">
-                    <div>
-                      <h3>Klip aralığı</h3>
-                      <span>
-                        Seçilen süre: <strong>{timecode(clipLength)}</strong>
-                      </span>
-                    </div>
-                    <div className="clip-heading-actions">
-                      <div className="clip-presets" aria-label="Klip süresi kısayolları">
-                        {clipPresets.map((milliseconds) => (
-                          <button
-                            type="button"
-                            key={milliseconds}
-                            className={clipLength === milliseconds ? "selected" : ""}
-                            onClick={() => applyClipPreset(milliseconds)}
-                          >
-                            {clipPresetLabel(milliseconds)}
-                          </button>
-                        ))}
-                      </div>
-                      <span className="timeline-total">
-                        {media.isLive ? "Canlı akış" : `Toplam ${duration(media.durationMs)}`}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="timeline">
-                    <div className="timeline-base" />
-                    <div
-                      className="timeline-selection"
-                      style={{ left: `${selectionLeft}%`, width: `${selectionWidth}%` }}
-                    />
-                    <input
-                      className="range-start"
-                      type="range"
-                      min={0}
-                      max={timelineMax}
-                      step={100}
-                      value={startMs}
-                      onChange={(event) => updateStart(Number(event.target.value))}
-                      aria-label="Klip başlangıcı"
-                    />
-                    <input
-                      className="range-end"
-                      type="range"
-                      min={0}
-                      max={timelineMax}
-                      step={100}
-                      value={endMs}
-                      onChange={(event) => updateEnd(Number(event.target.value))}
-                      aria-label="Klip bitişi"
-                    />
-                  </div>
-                  <div className="time-inputs">
-                    <label>
-                      <span>Başlangıç</span>
-                      <strong>{timecode(startMs)}</strong>
-                      <input
-                        type="number"
-                        min={0}
-                        max={Math.max(0, endMs - 100)}
-                        step={100}
-                        value={startMs}
-                        onChange={(event) => updateStart(Number(event.target.value))}
-                        aria-label="Başlangıç zamanı, milisaniye"
-                      />
-                      <small>milisaniye</small>
-                    </label>
-                    <label>
-                      <span>Bitiş</span>
-                      <strong>{timecode(endMs)}</strong>
-                      <input
-                        type="number"
-                        min={startMs + 100}
-                        max={knownDuration ?? undefined}
-                        step={100}
-                        value={endMs}
-                        onChange={(event) => updateEnd(Number(event.target.value))}
-                        aria-label="Bitiş zamanı, milisaniye"
-                      />
-                      <small>milisaniye</small>
-                    </label>
-                  </div>
-                  <div className="clip-mode-heading">
-                    <h3>Kesim yöntemi</h3>
-                    <span>İhtiyacına göre hız veya hassasiyet seç</span>
-                  </div>
-                  <div className="clip-modes">
-                    <button
-                      type="button"
-                      className={clipMode === "fast" ? "selected" : ""}
-                      onClick={() => setClipMode("fast")}
-                    >
-                      <span className="mode-icon"><Zap size={17} /></span>
-                      <span>
-                        <strong>Hızlı kesim</strong>
-                        <small>Hız odaklı kodlar; sosyal videolarda önerilir</small>
-                      </span>
-                      {clipMode === "fast" && <Check size={16} />}
-                    </button>
-                    <button
-                      type="button"
-                      className={clipMode === "precise" ? "selected" : ""}
-                      onClick={() => setClipMode("precise")}
-                    >
-                      <span className="mode-icon"><Target size={17} /></span>
-                      <span>
-                        <strong>Hassas kesim</strong>
-                        <small>Tam seçtiğin karede keser; daha uzun sürer</small>
-                      </span>
-                      {clipMode === "precise" && <Check size={16} />}
-                    </button>
-                  </div>
-              </section>
-              <div className="download-footer">
-                <div>
-                  <strong>{media.isLive ? "Canlı yayın klibi hazır" : "Kaydetmeye hazır"}</strong>
-                  <span>{timecode(startMs)} – {timecode(endMs)} klip aralığı</span>
-                </div>
-                <div className="download-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={download}
-                    disabled={saving || media.isLive}
-                    title={media.isLive ? "Canlı yayınlarda süreli klip kullanın" : undefined}
-                  >
-                    <ArrowDownToLine size={18} />
-                    Tamamını indir
-                  </button>
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={createClip}
-                    disabled={saving}
-                  >
-                    {saving ? <LoaderCircle className="spin" size={18} /> : <Scissors size={18} />}
-                    Klip oluştur
-                  </button>
-                </div>
-              </div>
-            </section>
-          ) : (
-            <div className="empty-state">
-              <div>
-                <Film size={32} />
-              </div>
-              <strong>Video bilgileri burada görünecek</strong>
-              <span>
-                Bir bağlantı çözümlediğinde kalite seçeneklerini görebilirsin.
-              </span>
-            </div>
-          )}
-        </div>
-        <aside className="side-column">
-          <section className="side-card browser-card">
-            <div className="side-head">
-              <span className="side-icon browser">
-                <Globe2 size={18} />
-              </span>
-              <div>
-                <h2>Tarayıcı akışları</h2>
-                <p>
-                  {detected.length
-                    ? `${detected.length} medya algılandı`
-                    : "DOM ve ağ adayları bekleniyor"}
-                </p>
-              </div>
-            </div>
-            {detected.length > 0 ? (
-              <div className="detected-list">
-                {detected.map((item) => (
-                  <button
-                    type="button"
-                    key={`${item.candidate.id}-${item.receivedAtMs}`}
-                    className={
-                      captured?.candidate.id === item.candidate.id ? "selected" : ""
-                    }
-                    onClick={() => void openDetectedCandidate(item)}
-                  >
-                    <span>
-                      {item.candidate.pageTitle ||
-                        new URL(item.candidate.pageUrl).hostname}
-                    </span>
-                    <small>
-                      {item.action === "clip" || item.action === "quick_clip"
-                        ? "Klip"
-                        : "İndir"} ·{" "}
-                      {item.candidate.protocol.toUpperCase()}
-                    </small>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="browser-empty">
-                Videonun üzerindeki Lipit simgesinden İndir veya Klip’i seç.
-              </p>
             )}
           </section>
-          <section className="side-card history-card">
-            <div className="side-head">
-              <span className="side-icon history-icon">
-                <HistoryIcon size={18} />
-              </span>
-              <div>
-                <h2>Kasa arşivi</h2>
-                <p>{history.length ? `${history.length} tamamlanan dosya` : "Henüz kayıt yok"}</p>
+
+          {media ? (
+            <>
+              <section className="workflow-section video-step">
+                <div className="workflow-heading compact">
+                  <span className="step-number">2</span>
+                  <div>
+                    <h2>Video</h2>
+                    <p>Klip oluşturmak istediğin videoyu kontrol et.</p>
+                  </div>
+                </div>
+                <div className="workspace-video-card">
+                  {media.thumbnail ? (
+                    <div className="workspace-thumbnail-wrap">
+                      <img className="workspace-thumbnail" src={media.thumbnail} alt="Video kapağı" />
+                      <span>{duration(media.durationMs)}</span>
+                    </div>
+                  ) : (
+                    <div className="workspace-thumbnail empty-thumb"><Film size={34} /></div>
+                  )}
+                  <div className="workspace-video-copy">
+                    <h3>{media.title}</h3>
+                    <p>{media.uploader || new URL(media.url).hostname}</p>
+                    <span><Clock3 size={15} /> {media.isLive ? "Canlı yayın" : duration(media.durationMs)}</span>
+                  </div>
+                  <div className="workspace-ready">
+                    <span><Check size={15} /> Video hazır</span>
+                    <p>Klip aralığını seçip dışa aktarabilirsin.</p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="workflow-section range-step">
+                <div className="workflow-heading compact">
+                  <span className="step-number">3</span>
+                  <div>
+                    <h2>Klip aralığı</h2>
+                    <p>Klibin başlangıç ve bitiş zamanını seç.</p>
+                  </div>
+                </div>
+                <div className="workspace-timeline">
+                  <div className="timeline-poster-strip" aria-hidden="true">
+                    {media.thumbnail
+                      ? Array.from({ length: 12 }, (_, index) => (
+                          <img key={index} src={media.thumbnail || ""} alt="" />
+                        ))
+                      : Array.from({ length: 12 }, (_, index) => <span key={index} />)}
+                  </div>
+                  <div
+                    className="timeline-dim before"
+                    style={{ width: `${selectionLeft}%` }}
+                  />
+                  <div
+                    className="timeline-dim after"
+                    style={{ left: `${selectionLeft + selectionWidth}%` }}
+                  />
+                  <div
+                    className="timeline-selection-frame"
+                    style={{ left: `${selectionLeft}%`, width: `${selectionWidth}%` }}
+                  />
+                  <input
+                    className="range-start"
+                    type="range"
+                    min={0}
+                    max={timelineMax}
+                    step={100}
+                    value={startMs}
+                    onChange={(event) => updateStart(Number(event.target.value))}
+                    aria-label="Klip başlangıcı"
+                  />
+                  <input
+                    className="range-end"
+                    type="range"
+                    min={0}
+                    max={timelineMax}
+                    step={100}
+                    value={endMs}
+                    onChange={(event) => updateEnd(Number(event.target.value))}
+                    aria-label="Klip bitişi"
+                  />
+                </div>
+                <div className="timeline-scale" aria-hidden="true">
+                  {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+                    <span key={ratio}>{duration(Math.round(timelineMax * ratio))}</span>
+                  ))}
+                </div>
+                <div className="range-controls">
+                  <label className="time-field">
+                    <span>Başlangıç</span>
+                    <TimecodeInput value={startMs} onCommit={updateStart} label="Başlangıç zamanı" />
+                    <small>SAAT : DAKİKA : SANİYE : MS</small>
+                  </label>
+                  <label className="time-field">
+                    <span>Bitiş</span>
+                    <TimecodeInput value={endMs} onCommit={updateEnd} label="Bitiş zamanı" />
+                    <small>SAAT : DAKİKA : SANİYE : MS</small>
+                  </label>
+                  <div className="selected-duration">
+                    <span>Seçilen süre</span>
+                    <strong>{timecode(clipLength)}</strong>
+                    <small>{clipPresetLabel(clipLength)}</small>
+                  </div>
+                  <div className="workspace-presets" aria-label="Klip süresi kısayolları">
+                    {clipPresets.map((milliseconds) => (
+                      <button
+                        type="button"
+                        key={milliseconds}
+                        className={clipLength === milliseconds ? "selected" : ""}
+                        onClick={() => applyClipPreset(milliseconds)}
+                      >
+                        {clipPresetLabel(milliseconds)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              <section className="workflow-section export-step">
+                <div className="workflow-heading compact">
+                  <span className="step-number">4</span>
+                  <div>
+                    <h2>Dışa aktarma</h2>
+                    <p>Dosya ayarlarını kontrol et ve kaydet.</p>
+                  </div>
+                </div>
+                <div className="export-row">
+                  <div className="export-options">
+                    <div className="export-field format-field">
+                      <FileVideo size={18} />
+                      <span><small>Biçim</small><strong>MP4</strong></span>
+                    </div>
+                    <label className="export-field">
+                      <Film size={18} />
+                      <span>
+                        <small>Çözünürlük</small>
+                        <select
+                          value={height == null ? "best" : String(height)}
+                          onChange={(event) => setHeight(event.target.value === "best" ? null : Number(event.target.value))}
+                        >
+                          {media.profiles.map((profile) => (
+                            <option key={profile.height ?? "best"} value={profile.height ?? "best"}>{profile.label}</option>
+                          ))}
+                        </select>
+                      </span>
+                    </label>
+                    <label className="export-field">
+                      <Zap size={18} />
+                      <span>
+                        <small>Kesim yöntemi</small>
+                        <select value={clipMode} onChange={(event) => setClipMode(event.target.value as ClipMode)}>
+                          <option value="fast">Hızlı kesim</option>
+                          <option value="precise">Hassas kesim</option>
+                        </select>
+                      </span>
+                    </label>
+                    <div className="export-field destination">
+                      <FolderOpen size={18} />
+                      <span><small>Kaydetme konumu</small><strong title={outputLocation}>{outputLocation}</strong></span>
+                      <button type="button" onClick={openSettings}>Değiştir</button>
+                    </div>
+                  </div>
+                  <div className="export-actions">
+                    <button
+                      className="download-video-button"
+                      type="button"
+                      onClick={download}
+                      disabled={saving || media.isLive}
+                      title={media.isLive ? "Canlı yayınlarda süreli klip kullanın" : "Videonun tamamını indir"}
+                    >
+                      <ArrowDownToLine size={18} /> Tamamını indir
+                    </button>
+                    <button className="create-clip-button" type="button" onClick={createClip} disabled={saving}>
+                      {saving ? <LoaderCircle className="spin" size={18} /> : <Scissors size={19} />}
+                      Klip oluştur
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </>
+          ) : (
+            <section className="workflow-section empty-workspace-step">
+              <div className="workflow-heading compact muted">
+                <span className="step-number">2</span>
+                <div><h2>Video</h2><p>Bağlantı hazır olduğunda video ve klip araçları burada açılır.</p></div>
               </div>
+              <div className="workspace-empty-state">
+                {resolving ? <LoaderCircle className="spin" size={28} /> : <Film size={30} />}
+                <strong>{resolving ? "Video hazırlanıyor" : "Bir video bağlantısı ekle"}</strong>
+                <span>{resolving ? "Kaynak ve kalite seçenekleri kontrol ediliyor." : "YouTube ve desteklenen diğer sitelerdeki DRM’siz videoları kullanabilirsin."}</span>
+              </div>
+            </section>
+          )}
+        </div>
+
+        {workspacePanelOpen && (
+          <button
+            className="workspace-panel-backdrop"
+            type="button"
+            onClick={() => setWorkspacePanelOpen(false)}
+            aria-label="Yan paneli kapat"
+          />
+        )}
+        <aside className={`workspace-sidebar ${workspacePanelOpen ? "open" : ""}`}>
+          <div className="workspace-sidebar-mobile-head">
+            <strong>Etkinlik</strong>
+            <button type="button" onClick={() => setWorkspacePanelOpen(false)} aria-label="Paneli kapat"><X size={18} /></button>
+          </div>
+          <section className="workspace-side-card recent-card">
+            <div className="workspace-side-head">
+              <span><HistoryIcon size={19} /></span>
+              <div><h2>Son dosyalar</h2><p>{history.length ? `${history.length} tamamlanan dosya` : "Henüz kayıt yok"}</p></div>
               {history.length > 0 && (
-                <button
-                  className="settings-toggle"
-                  type="button"
-                  onClick={() => void clearDownloadHistory()}
-                  title="Geçmişi temizle"
-                >
-                  <Trash2 size={14} />
-                </button>
+                <button type="button" onClick={() => void clearDownloadHistory()} title="Geçmişi temizle" aria-label="Geçmişi temizle"><Trash2 size={15} /></button>
               )}
             </div>
             {history.length > 0 ? (
-              <div className="history-list">
-                {history.slice(0, 8).map((entry) => (
+              <div className="workspace-history-list">
+                {history.slice(0, 6).map((entry) => (
                   <button
                     type="button"
                     key={entry.id}
-                    className="history-item"
+                    className="workspace-history-item"
                     onClick={() => void showPreview(entry)}
                     disabled={!entry.fileExists || previewLoading}
-                    title={entry.fileExists ? "Masaüstünde önizle" : "Dosya bulunamadı"}
                   >
-                    <span className="history-play">
-                      {previewLoading ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}
+                    <span className="workspace-history-thumb">
+                      {previewLoading ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />}
+                      {entry.kind === "clip" && entry.startMs != null && entry.endMs != null && <b>{duration(entry.endMs - entry.startMs)}</b>}
                     </span>
-                    <span className="history-copy">
+                    <span>
                       <strong>{entry.title}</strong>
-                      <small>
-                        {entry.kind === "clip" ? "Klip" : "Video"} · {fileSize(entry.sizeBytes)} · {historyDate(entry.completedAtMs)}
-                      </small>
+                      <small>{entry.kind === "clip" ? "Klip" : "Video"} · {fileSize(entry.sizeBytes)} · {historyDate(entry.completedAtMs)}</small>
                     </span>
-                    {!entry.fileExists && <i>Eksik</i>}
                   </button>
                 ))}
               </div>
             ) : (
-              <p className="browser-empty">Tamamlanan indirmeler burada saklanır.</p>
+              <div className="workspace-side-empty"><HistoryIcon size={21} /><span>Tamamlanan dosyaların burada görünür.</span></div>
             )}
           </section>
-          <section className="side-card jobs-card">
-            <div className="side-head">
-              <span className="side-icon blue">
-                <ArrowDownToLine size={18} />
-              </span>
-              <div>
-                <h2>İşlemler</h2>
-                <p>
-                  {jobs.filter((job) => active(job.status)).length
-                    ? `${jobs.filter((job) => active(job.status)).length} işlem sürüyor`
-                    : "Aktif işlem yok"}
-                </p>
-              </div>
+
+          <section className={`workspace-side-card operations-card ${jobs.length ? "has-items" : ""}`}>
+            <div className="workspace-side-head">
+              <span><ArrowDownToLine size={19} /></span>
+              <div><h2>İşlemler</h2><p>{activeJobs.length ? `${activeJobs.length} işlem sürüyor` : "Aktif işlem yok"}</p></div>
             </div>
             {jobs.length ? (
-              <div className="job-list">
-                {jobs.map((job) => (
-                  <div className="job-item" key={job.id}>
-                    <div className="job-top">
-                      <i className={job.status} />
-                      <strong title={job.outputPath}>
-                        {job.outputPath.split(/[\\/]/).pop()}
-                      </strong>
-                      {active(job.status) && (
-                        <button
-                          type="button"
-                          onClick={() => cancel(job.id)}
-                          title="İptal et"
-                        >
-                          <Square size={13} />
-                        </button>
-                      )}
+              <div className="workspace-job-list">
+                {jobs.slice(0, 6).map((job) => (
+                  <div className="workspace-job-item" key={job.id}>
+                    <div className="workspace-job-copy">
+                      <strong title={job.outputPath}>{job.outputPath.split(/[\\/]/).pop()}</strong>
+                      <span>{job.kind === "clip" ? "Klip" : "Video"} · {statusLabels[job.status]}</span>
                     </div>
-                    <div className="job-meta">
-                      <span>
-                        {job.kind === "clip" ? "Klip · " : ""}
-                        {statusLabels[job.status]}
-                      </span>
-                      <span>
-                        {["downloading", "encoding"].includes(job.status) &&
-                        job.progressPercent != null
-                          ? `${job.progressPercent.toFixed(0)}%`
-                          : ""}
-                      </span>
-                    </div>
-                    {job.kind === "clip" && job.startMs != null && job.endMs != null && (
-                      <div className="job-clip-range">
-                        {timecode(job.startMs)} – {timecode(job.endMs)} ·{" "}
-                        {job.clipMode === "precise" ? "Hassas" : "Hızlı"}
-                      </div>
-                    )}
                     {active(job.status) && (
-                      <div className="progress-track">
-                        <div
-                          style={{ width: `${job.progressPercent ?? 0}%` }}
-                        />
-                      </div>
+                      <button type="button" onClick={() => cancel(job.id)} title="İptal et" aria-label="İşlemi iptal et"><X size={15} /></button>
                     )}
-                    {job.status === "downloading" && (
-                      <div className="job-meta">
-                        <span>
-                          {job.speedBytesPerSecond
-                            ? `${(job.speedBytesPerSecond / 1048576).toFixed(1)} MB/sn`
-                            : ""}
-                        </span>
-                        <span>
-                          {job.etaSeconds != null
-                            ? `${job.etaSeconds} sn kaldı`
-                            : ""}
-                        </span>
-                      </div>
-                    )}
-                    {job.error && (
-                      <p className="job-error">{job.error.message}</p>
-                    )}
+                    <div className="workspace-job-progress"><span style={{ width: `${job.progressPercent ?? 0}%` }} /></div>
+                    <b>{job.progressPercent != null ? `${job.progressPercent.toFixed(0)}%` : job.status === "completed" ? "Tamam" : ""}</b>
+                    {job.error && <p>{job.error.message}</p>}
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="no-jobs">
-                <div>
-                  <ArrowDownToLine size={20} />
-                </div>
-                <strong>Henüz işlem yok</strong>
-                <span>İlk indirme veya klibin burada görünecek.</span>
-              </div>
+              <div className="workspace-side-empty compact"><ArrowDownToLine size={21} /><span>İndirme ve klip işlemleri burada görünür.</span></div>
             )}
           </section>
-          <div className="privacy-note">
-            <ShieldCheck size={18} />
-            <p>
-              Medya dosyaları bu bilgisayarda işlenir. DRM korumalı akışlar
-              desteklenmez.
-            </p>
-          </div>
+
+          {detected.length > 1 && (
+            <section className="workspace-side-card detected-card">
+              <div className="workspace-side-head">
+                <span><Globe2 size={19} /></span>
+                <div><h2>Tarayıcıdan yakalananlar</h2><p>{detected.length} medya bulundu</p></div>
+              </div>
+              <div className="workspace-detected-list">
+                {detected.slice(0, 5).map((item) => (
+                  <button
+                    type="button"
+                    key={`${item.candidate.id}-${item.receivedAtMs}`}
+                    className={captured?.candidate.id === item.candidate.id ? "selected" : ""}
+                    onClick={() => void openDetectedCandidate(item)}
+                  >
+                    <strong>{item.candidate.pageTitle || new URL(item.candidate.pageUrl).hostname}</strong>
+                    <small>{item.candidate.protocol.toUpperCase()}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
         </aside>
-      </main>
-      {onboardingOpen && (
+      </main>      {onboardingOpen && (
         <div className="modal-backdrop settings-backdrop" role="presentation">
           <section
             className="settings-modal onboarding-modal"
@@ -1958,7 +1931,12 @@ function MainApp() {
 }
 
 function App() {
-  const windowLabel = getCurrentWindow().label;
+  let windowLabel = "main";
+  try {
+    windowLabel = getCurrentWindow().label;
+  } catch {
+    // Browser previews do not expose the Tauri window API.
+  }
   const widgetJobId = windowLabel.startsWith("quick-widget-")
     ? windowLabel.slice("quick-widget-".length)
     : new URLSearchParams(window.location.search).get("widget");

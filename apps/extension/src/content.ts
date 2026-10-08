@@ -9,6 +9,8 @@ const overlayPositions = new WeakMap<
 >();
 let layoutQueued = false;
 let observedPageUrl = location.href;
+let overlaysHidden = false;
+const OVERLAYS_HIDDEN_KEY = "lipitOverlaysHidden";
 
 type ContentBridgeResponse =
   | { ok: true; candidateId: string }
@@ -416,8 +418,6 @@ function sendCapture(
   action: LipitProtocol.CaptureAction,
   status: HTMLSpanElement,
 ): void {
-  const toolbar = status.closest<HTMLElement>(".bar");
-  if (toolbar) toolbar.dataset.open = "true";
   const now = Date.now();
   if (capturesInFlight.has(video) || now - (lastCaptureAt.get(video) ?? 0) < 1500) {
     status.textContent = "İstek zaten gönderiliyor";
@@ -460,7 +460,6 @@ function sendCapture(
       window.setTimeout(() => {
         if (status.isConnected) {
           status.textContent = "";
-          if (toolbar) delete toolbar.dataset.open;
         }
       }, 3200);
       },
@@ -487,48 +486,41 @@ function createOverlay(video: HTMLVideoElement): OverlayController {
   shadow.innerHTML = `
     <style>
       :host { color-scheme: dark; }
-      .bar { display:flex; align-items:center; min-width:36px; min-height:36px; padding:4px; border:1px solid rgba(210,255,157,.2); border-radius:12px; background:rgba(10,15,16,.5); box-shadow:0 8px 24px rgba(0,0,0,.24); backdrop-filter:blur(8px); pointer-events:auto; opacity:.68; transition:border-color .18s ease, box-shadow .18s ease, opacity .18s ease, background .18s ease; }
-      .bar:hover,.bar:focus-within,.bar[data-open=true],.bar[data-dragging=true] { border-color:rgba(199,255,97,.55); background:rgba(10,15,16,.72); box-shadow:0 10px 28px rgba(0,0,0,.34),0 0 0 2px rgba(199,255,97,.08); opacity:.96; }
-      .brand { width:28px; height:28px; display:grid; place-items:center; flex:none; padding:0; border:0; border-radius:8px; color:#10150f; background:linear-gradient(145deg,rgba(199,255,97,.88),rgba(99,230,212,.88)); cursor:grab; touch-action:none; }
-      .bar[data-dragging=true] .brand { cursor:grabbing; }
-      .brand svg { width:16px; height:16px; }
-      .actions { max-width:0; display:flex; align-items:center; gap:4px; overflow:hidden; opacity:0; transform:translateX(4px); transition:max-width .22s ease,opacity .16s ease,transform .22s ease,margin .22s ease; }
-      .bar:hover .actions,.bar:focus-within .actions,.bar[data-open=true] .actions { max-width:390px; margin-left:5px; opacity:1; transform:none; }
-      .bar[data-hidden=true] .actions { max-width:0; margin-left:0; opacity:0; transform:translateX(4px); }
-      .bar[data-hidden=true] .brand { color:#9dacaa; background:#202a28; }
-      .action { appearance:none; border:0; border-radius:7px; padding:7px 9px; color:#10150f; background:rgba(199,255,97,.86); font:700 11px/1 system-ui,sans-serif; white-space:nowrap; cursor:pointer; }
-      .action.secondary { color:#dce7e1; background:rgba(38,50,47,.82); }
-      .action.quick { width:28px; padding:7px 0; color:#102019; background:rgba(99,230,212,.86); }
-      .action.hide { width:28px; padding:7px 0; color:#aab8b3; background:transparent; }
+      .bar { display:flex; align-items:center; gap:4px; min-height:36px; padding:4px; border:1px solid rgba(210,255,157,.2); border-radius:11px; background:rgba(10,15,16,.5); box-shadow:0 8px 24px rgba(0,0,0,.24); backdrop-filter:blur(8px); pointer-events:auto; opacity:.7; transition:border-color .18s ease, box-shadow .18s ease, opacity .18s ease, background .18s ease; }
+      .bar:hover,.bar:focus-within,.bar[data-dragging=true] { border-color:rgba(199,255,97,.48); background:rgba(10,15,16,.78); box-shadow:0 10px 28px rgba(0,0,0,.34); opacity:1; }
+      .action { position:relative; width:30px; height:30px; display:grid; place-items:center; flex:none; appearance:none; border:1px solid transparent; border-radius:7px; padding:0; color:#dce7e1; background:rgba(34,45,42,.88); cursor:pointer; touch-action:none; }
+      .action svg { width:16px; height:16px; pointer-events:none; }
+      .action.app { color:#132016; background:linear-gradient(145deg,rgba(199,255,97,.92),rgba(146,230,104,.9)); cursor:grab; }
+      .bar[data-dragging=true] .action.app { cursor:grabbing; }
+      .action.clip { color:#9ff0de; background:rgba(31,70,64,.9); }
+      .action.download { color:#ffc3a7; background:rgba(83,48,36,.9); }
+      .action::after { content:attr(data-tooltip); position:absolute; right:0; top:calc(100% + 8px); width:max-content; max-width:190px; padding:6px 8px; border:1px solid rgba(255,255,255,.12); border-radius:6px; color:#eef5f1; background:rgba(8,12,12,.96); box-shadow:0 7px 18px rgba(0,0,0,.34); font:600 11px/1.25 system-ui,sans-serif; pointer-events:none; opacity:0; transform:translateY(-3px); transition:opacity .12s ease,transform .12s ease; }
+      .action:hover::after,.action:focus-visible::after { opacity:1; transform:none; }
       button:hover { filter:brightness(1.08); }
       button:focus-visible { outline:2px solid #d9ff9a; outline-offset:2px; }
-      .status { display:none; max-width:220px; padding:0 6px; color:#c9d6d0; font:600 10px/1.25 system-ui,sans-serif; white-space:nowrap; }
+      .status { display:none; max-width:220px; padding:0 5px; color:#c9d6d0; font:600 10px/1.25 system-ui,sans-serif; white-space:nowrap; }
       .status:not(:empty) { display:block; }
       .status[data-kind="error"] { color:#ffb9c4; }
       .status[data-kind="success"] { color:#8cf0bf; }
     </style>
     <div class="bar" role="toolbar" aria-label="Lipit medya araçları">
-      <button class="brand" type="button" data-action="toggle" aria-label="Lipit araçlarını aç" aria-expanded="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v12H4z"/><path d="m7 4 2 3m4-3 2 3m4-3 1.3 2"/><path d="m10 11 5 3-5 3z"/></svg>
+      <button class="action app" type="button" data-action="open" data-tooltip="Lipit'te aç" aria-label="Videoyu Lipit uygulamasında aç">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m8 2 2 3m4-3 2 3m-7 5 6 3-6 3z"/></svg>
       </button>
-      <span class="actions">
-        <button class="action" type="button" data-action="download">İndir</button>
-        <button class="action quick" type="button" data-action="quick-download" title="Hızlı profile göre indir" aria-label="Hızlı profile göre indir">⚡</button>
-        <button class="action secondary" type="button" data-action="clip">Klip</button>
-        <button class="action quick" type="button" data-action="quick-clip" title="Hızlı profile göre klip al" aria-label="Hızlı profile göre klip al">⚡</button>
-        <button class="action hide" type="button" data-action="hide" title="Lipit araçlarını gizle" aria-label="Lipit araçlarını gizle">×</button>
-        <span class="status" role="status" aria-live="polite"></span>
-      </span>
+      <button class="action clip" type="button" data-action="quick-clip" data-tooltip="Hızlı klip al" aria-label="Hızlı profile göre klip al">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="m8.7 8.3 11.3 6.2M8.7 15.7 20 9.5"/></svg>
+      </button>
+      <button class="action download" type="button" data-action="quick-download" data-tooltip="Hızlı indir" aria-label="Hızlı profile göre indir">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>
+      </button>
+      <span class="status" role="status" aria-live="polite"></span>
     </div>`;
   const toolbar = shadow.querySelector<HTMLElement>(".bar");
-  const toggle = shadow.querySelector<HTMLButtonElement>("[data-action=toggle]");
+  const openApp = shadow.querySelector<HTMLButtonElement>("[data-action=open]");
   const status = shadow.querySelector<HTMLSpanElement>(".status");
-  const download = shadow.querySelector<HTMLButtonElement>("[data-action=download]");
-  const clip = shadow.querySelector<HTMLButtonElement>("[data-action=clip]");
   const quickDownload = shadow.querySelector<HTMLButtonElement>("[data-action=quick-download]");
   const quickClip = shadow.querySelector<HTMLButtonElement>("[data-action=quick-clip]");
-  const hide = shadow.querySelector<HTMLButtonElement>("[data-action=hide]");
-  if (!toolbar || !toggle || !status || !download || !clip || !quickDownload || !quickClip || !hide) {
+  if (!toolbar || !openApp || !status || !quickDownload || !quickClip) {
     throw new Error("Overlay could not be initialized");
   }
   let dragPointer: number | null = null;
@@ -544,14 +536,14 @@ function createOverlay(video: HTMLVideoElement): OverlayController {
     dragPointer = null;
     delete toolbar.dataset.dragging;
     try {
-      toolbar.releasePointerCapture(event.pointerId);
+      openApp.releasePointerCapture(event.pointerId);
     } catch {
       // Pointer capture can already be released when the page changes.
     }
   };
   toolbar.addEventListener("pointerdown", (event) => {
     const target = event.composedPath()[0];
-    if (target !== toggle || event.button !== 0) return;
+    if (target !== openApp || event.button !== 0) return;
     const hostRect = host.getBoundingClientRect();
     dragPointer = event.pointerId;
     dragOffsetX = event.clientX - hostRect.left;
@@ -560,7 +552,10 @@ function createOverlay(video: HTMLVideoElement): OverlayController {
     dragStartY = event.clientY;
     dragged = false;
     toolbar.dataset.dragging = "true";
-    toolbar.setPointerCapture(event.pointerId);
+    // Keep the pointer capture on the button that received pointerdown. If the
+    // toolbar captures it instead, Chromium may synthesize the click on the
+    // toolbar and the "Lipit'te aç" handler never runs.
+    openApp.setPointerCapture(event.pointerId);
   });
   toolbar.addEventListener("pointermove", (event) => {
     if (dragPointer !== event.pointerId) return;
@@ -591,36 +586,17 @@ function createOverlay(video: HTMLVideoElement): OverlayController {
   });
   toolbar.addEventListener("pointerup", finishDrag);
   toolbar.addEventListener("pointercancel", finishDrag);
-  toggle.addEventListener("click", () => {
+  openApp.addEventListener("click", () => {
     if (suppressToggleClick) {
       suppressToggleClick = false;
       return;
     }
-    if (toolbar.dataset.hidden === "true") {
-      delete toolbar.dataset.hidden;
-      toolbar.dataset.open = "true";
-      toggle.setAttribute("aria-label", "Lipit araçlarını kapat");
-      toggle.setAttribute("aria-expanded", "true");
-      return;
-    }
-    const open = toolbar.dataset.open !== "true";
-    if (open) toolbar.dataset.open = "true";
-    else delete toolbar.dataset.open;
-    toggle.setAttribute("aria-expanded", String(open));
+    sendCapture(video, "download", status);
   });
-  download.addEventListener("click", () => sendCapture(video, "download", status));
-  clip.addEventListener("click", () => sendCapture(video, "clip", status));
   quickDownload.addEventListener("click", () =>
     sendCapture(video, "quick_download", status),
   );
   quickClip.addEventListener("click", () => sendCapture(video, "quick_clip", status));
-  hide.addEventListener("click", () => {
-    toolbar.dataset.hidden = "true";
-    delete toolbar.dataset.open;
-    status.textContent = "";
-    toggle.setAttribute("aria-label", "Lipit araçlarını tekrar göster");
-    toggle.setAttribute("aria-expanded", "false");
-  });
   document.documentElement.append(host);
 
   const markEncrypted = () => {
@@ -671,6 +647,10 @@ function layoutOverlays(): void {
     if (!video.isConnected) {
       controller.destroy();
       overlays.delete(video);
+      continue;
+    }
+    if (overlaysHidden) {
+      controller.host.style.display = "none";
       continue;
     }
     const rect = video.getBoundingClientRect();
@@ -748,5 +728,33 @@ addEventListener("scroll", queueLayout, { capture: true, passive: true });
 addEventListener("resize", queueLayout, { passive: true });
 document.addEventListener("fullscreenchange", queueLayout);
 addEventListener("popstate", queueLayout);
+addEventListener(
+  "keydown",
+  (event) => {
+    if (
+      event.key === "F9" &&
+      event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      overlaysHidden = !overlaysHidden;
+      void chrome.storage.local.set({ [OVERLAYS_HIDDEN_KEY]: overlaysHidden });
+      queueLayout();
+    }
+  },
+  true,
+);
+chrome.storage.local.get({ [OVERLAYS_HIDDEN_KEY]: false }, (values) => {
+  overlaysHidden = values[OVERLAYS_HIDDEN_KEY] === true;
+  queueLayout();
+});
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[OVERLAYS_HIDDEN_KEY]) return;
+  overlaysHidden = changes[OVERLAYS_HIDDEN_KEY]?.newValue === true;
+  queueLayout();
+});
 addEventListener("hashchange", queueLayout);
 window.setInterval(queueLayout, 1500);

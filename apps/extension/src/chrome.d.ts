@@ -51,12 +51,32 @@ interface LipitWebRequestEvent {
 
 interface LipitStorageArea {
   get(key: string): Promise<Record<string, unknown>>;
+  get(
+    defaults: Record<string, unknown>,
+    callback: (items: Record<string, unknown>) => void,
+  ): void;
   set(items: Record<string, unknown>): Promise<void>;
+}
+
+interface LipitStorageChange {
+  oldValue?: unknown;
+  newValue?: unknown;
 }
 
 declare const chrome: {
   runtime: LipitChromeRuntime;
-  storage: { session: LipitStorageArea };
+  storage: {
+    session: LipitStorageArea;
+    local: LipitStorageArea;
+    onChanged: {
+      addListener(
+        listener: (
+          changes: Record<string, LipitStorageChange>,
+          areaName: string,
+        ) => void,
+      ): void;
+    };
+  };
   tabs: {
     onRemoved: {
       addListener(listener: (tabId: number) => void): void;

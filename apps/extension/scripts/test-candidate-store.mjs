@@ -35,9 +35,14 @@ assert.match(chromiumContent, /recommend-list-item-container/);
 assert.match(chromiumContent, /is_from_webapp=1&sender_device=pc/);
 assert.match(
   chromiumContent,
-  /data-action="download">İndir<\/button>[\s\S]*data-action="quick-download"[\s\S]*data-action="clip">Klip<\/button>[\s\S]*data-action="quick-clip"/,
+  /data-action="open"[\s\S]*data-action="quick-clip"[\s\S]*data-action="quick-download"/,
 );
-assert.match(chromiumContent, /Lipit araçlarını tekrar göster/);
+assert.match(chromiumContent, /data-tooltip="Lipit'te aç"/);
+assert.match(chromiumContent, /openApp\.setPointerCapture\(event\.pointerId\)/);
+assert.match(chromiumContent, /openApp\.releasePointerCapture\(event\.pointerId\)/);
+assert.doesNotMatch(chromiumContent, /toolbar\.setPointerCapture\(event\.pointerId\)/);
+assert.match(chromiumContent, /event\.key === "F9"/);
+assert.match(chromiumContent, /lipitOverlaysHidden/);
 
 class MemoryStorage {
   state = {};

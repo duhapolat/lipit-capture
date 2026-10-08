@@ -101,7 +101,7 @@ JavaScript | react | 19.3.0 | MIT | https://react.dev/
 JavaScript | rolldown | 1.2.9 | MIT | https://rolldown.rs/
 JavaScript | runtime | 1.11.1 | MIT
 JavaScript | scheduler | 0.28.0 | MIT | https://react.dev/
-JavaScript | source-map-js | 1.2.1 | BSD-3-Clause | https://github.com/7rulnik/source-map-js
+JavaScript | source-map-js | 1.2.2 | BSD-3-Clause | https://github.com/7rulnik/source-map-js
 JavaScript | tailwindcss | 4.3.3 | MIT | https://tailwindcss.com
 JavaScript | tapable | 2.3.3 | MIT | https://github.com/webpack/tapable
 JavaScript | tinyglobby | 0.2.17 | MIT | https://superchupu.dev/tinyglobby
@@ -1463,7 +1463,7 @@ The licenses of externally maintained libraries from which parts of the Software
 --------------------------------------------------------------------------------
 
 Used by:
-- JavaScript source-map-js@1.2.1 (LICENSE)
+- JavaScript source-map-js@1.2.2 (LICENSE)
 
 Copyright (c) 2009-2011, Mozilla Foundation and contributors
 All rights reserved.

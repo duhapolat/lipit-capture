@@ -8,10 +8,10 @@ presented as separate sources. Signed URL changes and adaptive quality variants
 are grouped while the best master manifest is preserved. The selected candidate is forwarded to the
 desktop app through Native Messaging.
 
-The compact video toolbar expands on hover or focus. The lightning buttons next
-to `İndir` and `Klip` use the quick profile saved in the desktop app. The `×`
-control collapses the toolbar to its Lipit icon; clicking the icon shows the
-controls again.
+The compact video toolbar contains three icon actions: open in Lipit, quick
+clip, and quick download. Hovering or focusing an icon shows its description.
+Drag the Lipit icon to reposition the toolbar over a video. `Shift + F9` hides
+or restores every Lipit toolbar and keeps that preference across page reloads.
 
 ## Local installation
 

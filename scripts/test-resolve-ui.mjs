@@ -120,7 +120,7 @@ try {
     main.webSocketDebuggerUrl,
     `(() => {
       const input = document.querySelector("#media-url");
-      const form = document.querySelector(".url-card");
+      const form = document.querySelector(".workspace-url-form");
       if (!(input instanceof HTMLInputElement) || !(form instanceof HTMLFormElement)) {
         throw new Error("Resolver form not found");
       }
@@ -139,9 +139,11 @@ try {
       await evaluate(
         main.webSocketDebuggerUrl,
         `JSON.stringify({
-          title: document.querySelector(".media-info h3")?.textContent ?? null,
+          title: document.querySelector(".workspace-video-card h3")?.textContent ?? null,
           error: document.querySelector(".error-banner")?.textContent?.trim() ?? null,
-          resolving: document.body.innerText.includes("Çözümlemeyi durdur")
+          resolving: Array.from(document.querySelectorAll("button")).some(
+            (button) => button.textContent?.trim() === "Durdur"
+          )
         })`,
       ),
     );

@@ -112,6 +112,10 @@ if (!process.argv.includes("--package-only")) {
 }
 stageResources(false);
 
+const bundleDirectory = join(tauri, "target", "release", "bundle", "nsis");
+// Never let a larger setup from an older release win the artifact selection.
+// Tauri leaves previous installers in this directory between builds.
+rmSync(bundleDirectory, { recursive: true, force: true });
 run([
   npmCli,
   "--prefix",
@@ -124,13 +128,16 @@ run([
   "nsis",
 ]);
 
-const bundleDirectory = join(tauri, "target", "release", "bundle", "nsis");
 const built = readdirSync(bundleDirectory)
-  .filter((name) => name.toLowerCase().endsWith("-setup.exe"))
+  .filter(
+    (name) =>
+      name.toLowerCase().endsWith("-setup.exe") &&
+      name.includes(`_${version}_`),
+  )
   .map((name) => join(bundleDirectory, name))
-  .sort((a, b) => statSync(b).size - statSync(a).size)[0];
+  .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
 if (!built) {
-  console.error("Tauri did not produce an NSIS setup executable.");
+  console.error(`Tauri did not produce an NSIS setup executable for ${version}.`);
   process.exit(1);
 }
 

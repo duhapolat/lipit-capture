@@ -86,11 +86,12 @@ jobs:
           $notes = @"
           ## Değişiklikler
 
-          - Chromium masaüstü bağlantısı için uygulama içi doğrulama ve onarım eklendi.
-          - Native Messaging hostu kurulumdan sonra gerçek PING mesajıyla sınanıyor.
-          - Chrome, Edge ve Brave kullanıcı kayıtları uygulama içinden yenilenebiliyor.
-          - Geçici medya kaynağı sınırlarında gereksiz çözümleme istekleri azaltıldı.
-          - Masaüstü ve uzantı sürüm etiketleri tek sürüm kaynağıyla eşitlendi.
+          - Masaüstü arayüzü dört adımlı, farklı ekran boyutlarına uyum sağlayan yeni çalışma alanıyla yenilendi.
+          - Klip başlangıç ve bitiş alanları saat:dakika:saniye:milisaniye biçimine geçirildi.
+          - Video üzerindeki araçlar Lipit'te aç, hızlı klip ve hızlı indirme olmak üzere üç simgeli düğme olarak tasarlandı.
+          - Video araçları sürüklenebilir hale getirildi; Shift+F9 ile gizleme ve yeniden gösterme eklendi.
+          - Lipit'te aç düğmesinin sürükleme sonrasında tıklamayı kaçırmasına neden olan Chromium davranışı düzeltildi.
+          - Eski bir setup dosyasının yanlışlıkla yeni sürüm adıyla seçilebilmesine neden olan paketleme hatası giderildi.
 
           ## Kurulum
 
