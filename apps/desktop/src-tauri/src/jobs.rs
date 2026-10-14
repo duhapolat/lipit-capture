@@ -15,13 +15,16 @@ use uuid::Uuid;
 use crate::{
     binary::{self, Binary},
     clip::{self, ClipSpec},
-    history, media,
+    history, log, media,
     models::{
         AppError, ClipMode, ClipRequest, DownloadJob, DownloadRequest, JobKind, JobStatus,
         RequestContext,
     },
-    settings,
+    settings, stats, url_safety,
 };
+
+/// Finished jobs kept in memory for the UI; older ones live in history.
+const MAX_FINISHED_JOBS: usize = 50;
 
 #[derive(Clone)]
 pub struct JobManager {
@@ -79,6 +82,7 @@ impl JobManager {
             refresh_url: request.refresh_url,
             known_duration_ms: request.known_duration_ms,
             request_context: request.request_context,
+            auto_rename: request.auto_rename,
         };
         self.enqueue(app, download, Some(clip)).await
     }
@@ -101,7 +105,7 @@ impl JobManager {
         {
             return Err(AppError::new("INVALID_DURATION", "Medya süresi geçersiz."));
         }
-        let destination = validate_destination(&request.output_path)?;
+        let destination = validate_destination(&request.output_path, request.auto_rename)?;
         let id = Uuid::new_v4().to_string();
         let job = DownloadJob {
             id: id.clone(),
@@ -139,6 +143,7 @@ impl JobManager {
                     "Aynı video için bu işlem zaten sırada veya devam ediyor.",
                 ));
             }
+            prune_finished(&mut jobs);
             jobs.insert(id.clone(), job.clone());
         }
         self.shared
@@ -176,6 +181,15 @@ impl JobManager {
             }
         });
         Ok(())
+    }
+
+    pub fn output_path(&self, id: &str) -> Option<PathBuf> {
+        self.shared
+            .jobs
+            .lock()
+            .ok()?
+            .get(id)
+            .map(|job| PathBuf::from(&job.output_path))
     }
 
     pub async fn list(&self) -> Vec<DownloadJob> {
@@ -247,24 +261,54 @@ impl JobManager {
                 let _ = fs::remove_dir_all(dir);
             }
         }
+        let host = url::Url::parse(&request.url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned));
         match result {
-            Ok(()) => {
-                let _ = history::record_completed(&app, &id, &request, clip, &destination);
+            Ok(saved) => {
+                if let Err(error) = history::record_completed(&app, &id, &request, clip, &saved) {
+                    log::warn(format!("Geçmiş kaydı yazılamadı: {}", error.code));
+                }
+                create_thumbnail(&app, &id, &saved).await;
+                stats::record(
+                    &app,
+                    stats::Event::Completed {
+                        host: host.as_deref(),
+                    },
+                );
+                log::info(format!(
+                    "İş {id} tamamlandı ({}, kaynak {})",
+                    if clip.is_some() { "klip" } else { "indirme" },
+                    host.as_deref().unwrap_or("?")
+                ));
                 self.update(&app, &id, |job| {
                     job.status = JobStatus::Completed;
+                    job.output_path = saved.to_string_lossy().into_owned();
                     job.progress_percent = Some(100.0);
                     job.speed_bytes_per_second = None;
                     job.eta_seconds = None;
                 });
             }
-            Err(error) if error.code == "CANCELLED" => self.update(&app, &id, |job| {
-                job.status = JobStatus::Cancelled;
-                job.error = None;
-            }),
-            Err(error) => self.update(&app, &id, |job| {
-                job.status = JobStatus::Failed;
-                job.error = Some(error);
-            }),
+            Err(error) if error.code == "CANCELLED" => {
+                stats::record(&app, stats::Event::Cancelled);
+                log::info(format!("İş {id} iptal edildi."));
+                self.update(&app, &id, |job| {
+                    job.status = JobStatus::Cancelled;
+                    job.error = None;
+                });
+            }
+            Err(error) => {
+                stats::record(&app, stats::Event::Failed { code: error.code });
+                log::error(format!(
+                    "İş {id} başarısız: {} (kaynak {})",
+                    error.code,
+                    host.as_deref().unwrap_or("?")
+                ));
+                self.update(&app, &id, |job| {
+                    job.status = JobStatus::Failed;
+                    job.error = Some(error);
+                });
+            }
         }
         self.shared
             .cancellations
@@ -284,10 +328,11 @@ impl JobManager {
         id: &str,
         job_dir: &Path,
         cancel: watch::Receiver<bool>,
-    ) -> Result<(), AppError> {
+    ) -> Result<PathBuf, AppError> {
         fs::create_dir_all(job_dir)
             .map_err(|_| AppError::new("TEMP_UNAVAILABLE", "Geçici klasör oluşturulamadı."))?;
         self.update(app, id, |job| job.status = JobStatus::Resolving);
+        url_safety::ensure_public_resolution(&media::validate_url(&request.url)?).await?;
         let mut media = if request.direct {
             Some(
                 if let Some(refresh_url) = request
@@ -402,7 +447,11 @@ impl JobManager {
                 "--merge-output-format".into(), "mp4".into(),
                 "-o".into(), output_template,
             ];
-            args.extend(settings::yt_dlp_args(app, &request.request_context)?);
+            args.extend(settings::yt_dlp_args(
+                app,
+                &request.request_context,
+                settings::EngineStage::Download,
+            )?);
             if let Some(clip) = clip {
                 args.extend(["--download-sections".into(), clip.section()]);
                 if matches!(clip.mode, ClipMode::Precise) {
@@ -473,8 +522,7 @@ impl JobManager {
             return Err(AppError::new("CANCELLED", "İşlem iptal edildi."));
         }
         self.update(app, id, |job| job.status = JobStatus::Saving);
-        save_noclobber(&final_media, destination)?;
-        Ok(())
+        save_noclobber(&final_media, destination, request.auto_rename)
     }
 }
 
@@ -561,7 +609,64 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
     AppError::new("INTERNAL_ERROR", "İşlem durumu okunamadı.")
 }
 
-fn validate_destination(raw: &str) -> Result<PathBuf, AppError> {
+fn prune_finished(jobs: &mut HashMap<String, DownloadJob>) {
+    let finished: Vec<String> = jobs
+        .iter()
+        .filter(|(_, job)| {
+            matches!(
+                job.status,
+                JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+            )
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    // Completed jobs are already in history, so dropping any finished job
+    // beyond the cap loses nothing the user cannot see elsewhere.
+    for id in finished.iter().skip(MAX_FINISHED_JOBS) {
+        jobs.remove(id);
+    }
+}
+
+/// Stores a small JPEG for the history list. Failures are logged and ignored.
+async fn create_thumbnail(app: &AppHandle, id: &str, video: &Path) {
+    let Ok(target) = history::thumbnail_path(app, id) else {
+        return;
+    };
+    if let Some(parent) = target.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let args = vec![
+        "-hide_banner".into(),
+        "-nostdin".into(),
+        "-y".into(),
+        "-ss".into(),
+        "1".into(),
+        "-i".into(),
+        video.to_string_lossy().into_owned(),
+        "-frames:v".into(),
+        "1".into(),
+        "-vf".into(),
+        "scale=240:-2".into(),
+        "-q:v".into(),
+        "5".into(),
+        target.to_string_lossy().into_owned(),
+    ];
+    if binary::run(
+        app,
+        Binary::Ffmpeg,
+        &args,
+        Duration::from_secs(20),
+        None,
+        |_, _| {},
+    )
+    .await
+    .is_err()
+    {
+        log::warn(format!("İş {id} için küçük resim oluşturulamadı."));
+    }
+}
+
+fn validate_destination(raw: &str, auto_rename: bool) -> Result<PathBuf, AppError> {
     let path = PathBuf::from(raw);
     if !path.is_absolute()
         || path
@@ -578,7 +683,7 @@ fn validate_destination(raw: &str) -> Result<PathBuf, AppError> {
             "MP4 dosyası için geçerli bir kayıt konumu seçin.",
         ));
     }
-    if !path.parent().is_some_and(Path::is_dir) || path.exists() {
+    if !path.parent().is_some_and(Path::is_dir) || (path.exists() && !auto_rename) {
         return Err(AppError::new(
             "FILE_EXISTS",
             "Hedef dosya mevcut veya klasör kullanılamıyor. Başka bir ad seçin.",
@@ -694,7 +799,14 @@ async fn prepare_mp4(
     Ok(target)
 }
 
-fn save_noclobber(source: &Path, destination: &Path) -> Result<(), AppError> {
+/// Copies the finished file next to its destination and commits it without
+/// ever overwriting. With `auto_rename`, a name taken in the meantime (for
+/// example by another queued job with the same title) becomes `name_N.mp4`.
+fn save_noclobber(
+    source: &Path,
+    destination: &Path,
+    auto_rename: bool,
+) -> Result<PathBuf, AppError> {
     let parent = destination
         .parent()
         .ok_or_else(|| AppError::new("INVALID_DESTINATION", "Kayıt konumu geçersiz."))?;
@@ -703,14 +815,29 @@ fn save_noclobber(source: &Path, destination: &Path) -> Result<(), AppError> {
         .map_err(|_| AppError::new("FILE_PERMISSION_DENIED", "Geçici dosya okunamadı."))?;
     io::copy(&mut input, staged.as_file_mut()).map_err(file_write_error)?;
     staged.as_file_mut().flush().map_err(file_write_error)?;
-    staged.persist_noclobber(destination).map_err(|error| {
-        if destination.exists() {
-            AppError::new("FILE_EXISTS", "Hedef dosya zaten mevcut.")
-        } else {
-            file_write_error(error.error)
+    let mut target = destination.to_path_buf();
+    for _ in 0..32 {
+        match staged.persist_noclobber(&target) {
+            Ok(_) => return Ok(target),
+            Err(error) if auto_rename && target.exists() => {
+                staged = error.file;
+                target = settings::free_path(destination).ok_or_else(|| {
+                    AppError::new("FILE_EXISTS", "Kullanılabilir bir dosya adı bulunamadı.")
+                })?;
+            }
+            Err(error) => {
+                return Err(if target.exists() {
+                    AppError::new("FILE_EXISTS", "Hedef dosya zaten mevcut.")
+                } else {
+                    file_write_error(error.error)
+                })
+            }
         }
-    })?;
-    Ok(())
+    }
+    Err(AppError::new(
+        "FILE_EXISTS",
+        "Kullanılabilir bir dosya adı bulunamadı.",
+    ))
 }
 
 fn file_write_error(error: io::Error) -> AppError {
@@ -758,7 +885,10 @@ fn parse_ffmpeg_progress(output: &str, expected_ms: u64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{direct_ffmpeg_args, parse_ffmpeg_progress};
+    use super::{
+        direct_ffmpeg_args, find_download, parse_ffmpeg_progress, parse_progress, save_noclobber,
+        validate_destination,
+    };
     use crate::{
         clip::ClipSpec,
         models::{ClipMode, RequestContext},
@@ -803,6 +933,72 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-preset", "veryfast"]));
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
         assert!(!args.windows(2).any(|pair| pair == ["-c", "copy"]));
+    }
+
+    #[test]
+    fn renames_at_commit_time_when_auto_rename_is_enabled() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.bin");
+        std::fs::write(&source, b"video").unwrap();
+        let destination = directory.path().join("Same title.mp4");
+        let first = save_noclobber(&source, &destination, true).unwrap();
+        let second = save_noclobber(&source, &destination, true).unwrap();
+        assert_eq!(first, destination);
+        assert_eq!(second, directory.path().join("Same title_1.mp4"));
+        assert_eq!(
+            save_noclobber(&source, &destination, false)
+                .unwrap_err()
+                .code,
+            "FILE_EXISTS"
+        );
+    }
+
+    #[test]
+    fn validates_destinations() {
+        let directory = tempfile::tempdir().unwrap();
+        let existing = directory.path().join("taken.mp4");
+        std::fs::write(&existing, b"x").unwrap();
+        let existing = existing.to_string_lossy().into_owned();
+        assert_eq!(
+            validate_destination(&existing, false).unwrap_err().code,
+            "FILE_EXISTS"
+        );
+        assert!(validate_destination(&existing, true).is_ok());
+        assert_eq!(
+            validate_destination("relative.mp4", true).unwrap_err().code,
+            "INVALID_DESTINATION"
+        );
+        let wrong = directory
+            .path()
+            .join("clip.mkv")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            validate_destination(&wrong, true).unwrap_err().code,
+            "INVALID_DESTINATION"
+        );
+    }
+
+    #[test]
+    fn picks_the_largest_finished_download() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("media.mp4"), vec![0; 10]).unwrap();
+        std::fs::write(directory.path().join("media.mp4.part"), vec![0; 100]).unwrap();
+        std::fs::write(directory.path().join("thumb.jpg"), vec![0; 2]).unwrap();
+        assert_eq!(
+            find_download(directory.path()).unwrap(),
+            directory.path().join("media.mp4")
+        );
+    }
+
+    #[test]
+    fn parses_yt_dlp_progress_lines() {
+        assert_eq!(
+            parse_progress("LIPIT_PROGRESS| 42.5%|1048576.0|12"),
+            Some((42.5, Some(1_048_576.0), Some(12)))
+        );
+        assert_eq!(parse_progress("LIPIT_PROGRESS|NA|NA|NA"), None);
+        assert_eq!(parse_progress("[download] 10%"), None);
     }
 
     #[test]

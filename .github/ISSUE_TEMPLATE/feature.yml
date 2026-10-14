@@ -1,0 +1,30 @@
+name: Özellik önerisi
+description: Lipit için bir iyileştirme öner
+labels: ["öneri"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Önerini yazmadan önce docs/urun-vizyonu.md içindeki "Yapmadıklarımız" listesine göz at.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Hangi sorunu çözüyor?
+      description: Şu an neyi yapamıyorsun veya neyi zor yapıyorsun?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Önerin
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Bu ihtiyaç ne sıklıkla doğuyor?
+      options:
+        - Her gün
+        - Haftada birkaç kez
+        - Ayda birkaç kez
+        - Nadiren

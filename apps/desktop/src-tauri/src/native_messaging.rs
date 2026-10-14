@@ -20,6 +20,26 @@ const MAX_STORED_CANDIDATE_BYTES: u64 = 256 * 1024;
 const APP_IDENTIFIER: &str = "com.lipit.capture";
 const NATIVE_HOST_NAME: &str = "com.lipit.capture";
 const EXTENSION_ID: &str = "nhcgifoaikjkndkbnkkllknmlfbkdcbc";
+/// Named mutex held by the running desktop app (see `lib.rs`).
+pub const DESKTOP_MUTEX_NAME: &str = "Local\\LipitCaptureDesktop-4A85B949";
+const HEARTBEAT_FILE: &str = "extension-heartbeat.json";
+
+/// What the desktop knows about the browser extension connection.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionStatus {
+    pub extension_folder: Option<String>,
+    pub host_registered: bool,
+    pub last_seen_ms: Option<u64>,
+    pub extension_version: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Heartbeat {
+    seen_at_ms: u64,
+    extension_version: String,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,6 +125,8 @@ struct NativeRequest {
     kind: String,
     action: Option<CaptureAction>,
     candidate: Option<MediaCandidate>,
+    #[serde(default)]
+    extension_version: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -165,7 +187,7 @@ pub fn validate_candidate(candidate: &MediaCandidate) -> Result<(), AppError> {
     if candidate.drm {
         return Err(AppError::new(
             "DRM_PROTECTED",
-            "DRM protected — download unavailable",
+            "DRM korumalı medya indirilemez.",
         ));
     }
     Ok(())
@@ -186,7 +208,7 @@ fn validate_text(value: Option<&str>, max_len: usize) -> Result<(), AppError> {
     }
 }
 
-fn inbox_dir() -> Result<PathBuf, AppError> {
+fn bridge_dir() -> Result<PathBuf, AppError> {
     let base = env::var_os("APPDATA")
         .map(PathBuf::from)
         .or_else(|| env::var_os("LOCALAPPDATA").map(PathBuf::from))
@@ -196,10 +218,100 @@ fn inbox_dir() -> Result<PathBuf, AppError> {
                 "Tarayıcı bağlantı klasörü bulunamadı.",
             )
         })?;
-    Ok(base
-        .join(APP_IDENTIFIER)
-        .join("native-messaging")
-        .join("inbox"))
+    Ok(base.join(APP_IDENTIFIER).join("native-messaging"))
+}
+
+fn inbox_dir() -> Result<PathBuf, AppError> {
+    bridge_dir().map(|path| path.join("inbox"))
+}
+
+fn valid_extension_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value.split('.').count() <= 4
+        && value
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn write_heartbeat(extension_version: &str) -> Result<(), AppError> {
+    let directory = bridge_dir()?;
+    fs::create_dir_all(&directory).map_err(|_| {
+        AppError::new(
+            "NATIVE_BRIDGE_UNAVAILABLE",
+            "Tarayıcı bağlantı klasörü oluşturulamadı.",
+        )
+    })?;
+    let heartbeat = Heartbeat {
+        seen_at_ms: now_ms(),
+        extension_version: extension_version.to_owned(),
+    };
+    let bytes = serde_json::to_vec(&heartbeat)
+        .map_err(|_| AppError::new("INVALID_MESSAGE", "Mesaj kaydedilemedi."))?;
+    let temporary = directory.join(format!(".{}.tmp", Uuid::new_v4()));
+    fs::write(&temporary, bytes)
+        .and_then(|()| fs::rename(&temporary, directory.join(HEARTBEAT_FILE)))
+        .map_err(|_| {
+            let _ = fs::remove_file(&temporary);
+            AppError::new("NATIVE_BRIDGE_UNAVAILABLE", "Mesaj kaydedilemedi.")
+        })
+}
+
+/// Reports whether the extension has talked to this computer recently and
+/// where its unpacked files live, for the in-app setup guide.
+pub fn extension_status(resource_dir: Option<PathBuf>) -> ExtensionStatus {
+    let heartbeat: Option<Heartbeat> = bridge_dir()
+        .ok()
+        .map(|directory| directory.join(HEARTBEAT_FILE))
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let extension_folder = resource_dir
+        .map(|directory| directory.join("extension"))
+        .filter(|directory| directory.join("manifest.json").is_file())
+        .or_else(development_extension_folder)
+        .map(|directory| directory.to_string_lossy().into_owned());
+    ExtensionStatus {
+        extension_folder,
+        host_registered: host_manifest_registered(),
+        last_seen_ms: heartbeat.as_ref().map(|value| value.seen_at_ms),
+        extension_version: heartbeat.map(|value| value.extension_version),
+    }
+}
+
+#[cfg(debug_assertions)]
+fn development_extension_folder() -> Option<PathBuf> {
+    let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("extension")
+        .join("dist");
+    folder.join("manifest.json").is_file().then_some(folder)
+}
+
+#[cfg(not(debug_assertions))]
+fn development_extension_folder() -> Option<PathBuf> {
+    None
+}
+
+fn host_manifest_registered() -> bool {
+    let Some(local) = env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
+        return false;
+    };
+    let manifest = local
+        .join("Lipit Capture")
+        .join("NativeMessaging")
+        .join("chromium")
+        .join(format!("{NATIVE_HOST_NAME}.json"));
+    fs::read(manifest)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| {
+            value
+                .get("path")
+                .and_then(|path| path.as_str())
+                .map(PathBuf::from)
+        })
+        .is_some_and(|host| host.is_file())
 }
 
 fn store_candidate(candidate: &StoredCandidate) -> Result<(), AppError> {
@@ -545,7 +657,32 @@ fn handle_payload(payload: &[u8]) -> NativeResponse {
             candidate_id: None,
             error: None,
         },
+        "HELLO" if request.action.is_none() && request.candidate.is_none() => {
+            let Some(version) = request
+                .extension_version
+                .as_deref()
+                .filter(|version| valid_extension_version(version))
+            else {
+                return error_response("INVALID_MESSAGE", "Uzantı sürümü geçersiz.");
+            };
+            if let Err(error) = write_heartbeat(version) {
+                return error_response(error.code, &error.message);
+            }
+            NativeResponse {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "PONG".into(),
+                candidate_id: None,
+                error: None,
+            }
+        }
         "MEDIA_DETECTED" => {
+            if let Some(version) = request
+                .extension_version
+                .as_deref()
+                .filter(|version| valid_extension_version(version))
+            {
+                let _ = write_heartbeat(version);
+            }
             let (Some(action), Some(candidate)) = (request.action, request.candidate) else {
                 return error_response("INVALID_MESSAGE", "Medya adayı eksik.");
             };
@@ -652,17 +789,25 @@ fn launch_desktop_if_needed(quick: bool) -> io::Result<()> {
     command.spawn().map(|_| ())
 }
 
+/// The desktop app owns a named mutex while it runs; opening it is far
+/// cheaper than enumerating processes and does not depend on the exe name.
 #[cfg(windows)]
 fn desktop_is_running() -> bool {
-    Command::new("tasklist.exe")
-        .args(["/FI", "IMAGENAME eq lipit-desktop.exe", "/FO", "CSV", "/NH"])
-        .output()
-        .ok()
-        .is_some_and(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .to_ascii_lowercase()
-                .contains("lipit-desktop.exe")
-        })
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE},
+    };
+
+    let name: Vec<u16> = DESKTOP_MUTEX_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let handle = unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) };
+    if handle.is_null() {
+        return false;
+    }
+    unsafe { CloseHandle(handle) };
+    true
 }
 
 #[cfg(not(windows))]
@@ -716,6 +861,21 @@ mod tests {
         let mut value = candidate();
         value.media_url = Some("file:///c:/secret.mp4".into());
         assert_eq!(validate_candidate(&value).unwrap_err().code, "INVALID_URL");
+    }
+
+    #[test]
+    fn accepts_only_numeric_extension_versions() {
+        assert!(valid_extension_version("1.0.0.5"));
+        assert!(!valid_extension_version("1.0.0.5.1"));
+        assert!(!valid_extension_version("1.0-beta"));
+        assert!(!valid_extension_version(""));
+    }
+
+    #[test]
+    fn hello_requires_a_valid_version() {
+        let response =
+            handle_payload(br#"{"protocolVersion":1,"type":"HELLO","extensionVersion":"x"}"#);
+        assert_eq!(response.kind, "ERROR");
     }
 
     #[test]

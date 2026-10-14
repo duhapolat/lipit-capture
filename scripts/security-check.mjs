@@ -49,6 +49,27 @@ const csp = tauri.app?.security?.csp || "";
 requireCondition(!csp.includes("'unsafe-eval'"), "Tauri CSP must not allow unsafe-eval");
 requireCondition(csp.startsWith("default-src 'self'"), "Tauri CSP must default to self");
 requireCondition(Array.isArray(tauri.app?.security?.assetProtocol?.scope) && tauri.app.security.assetProtocol.scope.length === 0, "Asset protocol must start with an empty scope");
+const connectSources = csp.match(/connect-src ([^;]+)/)?.[1]?.trim().split(/\s+/) ?? [];
+requireCondition(
+  connectSources.every((source) => ["ipc:", "http://ipc.localhost", "https://api.github.com"].includes(source)),
+  `Unexpected connect-src entries: ${connectSources.join(" ")}`,
+);
+
+// Build-machine paths must never be compiled into release binaries, otherwise
+// a file planted at that path on a user's PC could be executed (audit G-01).
+const rustSourceDir = join(root, "apps", "desktop", "src-tauri", "src");
+for (const entry of await readdir(rustSourceDir, { recursive: true })) {
+  if (!String(entry).endsWith(".rs")) continue;
+  const lines = (await readFile(join(rustSourceDir, String(entry)), "utf8")).split(/\r?\n/);
+  lines.forEach((line, index) => {
+    if (!line.includes('env!("CARGO_MANIFEST_DIR")')) return;
+    const context = lines.slice(Math.max(0, index - 8), index).join("\n");
+    requireCondition(
+      /cfg\((?:debug_assertions|test)\)/.test(context),
+      `${entry}:${index + 1} uses CARGO_MANIFEST_DIR outside a debug/test-only block`,
+    );
+  });
+}
 
 const capability = JSON.parse(await readFile(join(root, "apps", "desktop", "src-tauri", "capabilities", "default.json"), "utf8"));
 requireCondition(!capability.permissions.some((permission) => String(permission).startsWith("shell:")), "Frontend must not have shell permissions");
@@ -101,6 +122,14 @@ const defaults = await readFile(join(root, "apps", "desktop", "src-tauri", "src"
 requireCondition(/cookies_enabled:\s*false/.test(defaults), "Browser cookies must be disabled by default");
 requireCondition(/remote_ejs_enabled:\s*false/.test(defaults), "Remote EJS must be disabled by default");
 requireCondition(/po_token_providers_enabled:\s*false/.test(defaults), "Third party token providers must be disabled by default");
+requireCondition(/pub terms_accepted:\s*bool/.test(defaults), "Usage terms acceptance must be stored in settings");
+for (const document of ["KULLANIM-KOSULLARI.md", "GIZLILIK.md", "PRIVACY.md"]) {
+  requireCondition(existsSync(join(root, document)), `Missing legal document: ${document}`);
+  requireCondition(
+    tauri.bundle?.resources?.[`../../../${document}`] === `legal/${document}`,
+    `Legal document is not bundled: ${document}`,
+  );
+}
 
 if (failures.length) {
   console.error(failures.map((failure) => `- ${failure}`).join("\n"));

@@ -9,6 +9,7 @@ use tauri_plugin_shell::{
 use tokio::sync::watch;
 
 use crate::{
+    log,
     models::{AppError, EngineUpdateResult, EngineVersions},
     settings,
 };
@@ -21,17 +22,28 @@ pub enum Binary {
     Deno,
 }
 
+/// Directories that may contain the packaged media engines, in priority order.
+///
+/// Release builds only trust the folder of the running executable. The source
+/// tree fallback exists for `cargo test`/debug runs and is compiled out of
+/// release binaries, so no build-machine path can be planted on a user's PC.
+fn engine_dirs() -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    if let Some(packaged) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(PathBuf::from))
+    {
+        directories.push(packaged);
+    }
+    #[cfg(debug_assertions)]
+    directories.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries"));
+    directories
+}
+
 pub fn ffmpeg_dir() -> Option<PathBuf> {
-    let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
-    if local.join("ffmpeg.exe").exists() && local.join("ffprobe.exe").exists() {
-        return Some(local);
-    }
-    let packaged = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    if packaged.join("ffmpeg.exe").exists() && packaged.join("ffprobe.exe").exists() {
-        Some(packaged)
-    } else {
-        None
-    }
+    engine_dirs().into_iter().find(|directory| {
+        directory.join("ffmpeg.exe").is_file() && directory.join("ffprobe.exe").is_file()
+    })
 }
 
 impl Binary {
@@ -128,7 +140,15 @@ async fn run_command(
                 }
                 Some(CommandEvent::Terminated(payload)) => {
                     if payload.code == Some(0) { return Ok(ProcessOutput { stdout, stderr }); }
-                    return Err(classify_failure(binary, &stderr));
+                    let error = classify_failure(binary, &stderr);
+                    log::error(format!(
+                        "{} çıkış kodu {:?}, sınıf {}: {}",
+                        binary.name(),
+                        payload.code,
+                        error.code,
+                        stderr_tail(&stderr)
+                    ));
+                    return Err(error);
                 }
                 Some(_) => {}
                 None => return Err(AppError::new("ENGINE_FAILED", "Medya motoru beklenmedik şekilde kapandı.")),
@@ -179,40 +199,121 @@ fn append_limited(buffer: &mut String, line: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Maps engine error output to a stable code and an actionable message.
+/// Patterns are checked in order; the first match wins.
+const FAILURE_PATTERNS: &[(&[&str], &str, &str)] = &[
+    (
+        &["drm protected", "drm-protected", "widevine", "playready", "this video is drm"],
+        "DRM_PROTECTED",
+        "DRM korumalı medya indirilemez.",
+    ),
+    (
+        &["no space left", "disk full", "not enough space"],
+        "DISK_FULL",
+        "Diskte yeterli boş alan yok.",
+    ),
+    (
+        &["http error 429", "too many requests", "error 429"],
+        "RATE_LIMITED",
+        "Kaynak çok fazla istek nedeniyle beklemeni istiyor (429). Birkaç dakika sonra tekrar dene.",
+    ),
+    (
+        &["not a bot", "confirm you're not a bot", "confirm you’re not a bot"],
+        "BOT_CHECK",
+        "Kaynak otomatik erişim doğrulaması istiyor. Bir süre bekleyip tekrar dene, yt-dlp'yi güncelle veya çerez uyumluluğunu kullan.",
+    ),
+    (
+        &["confirm your age", "age-restricted", "age restricted", "inappropriate for some users"],
+        "AGE_RESTRICTED",
+        "Bu video yaş doğrulaması istiyor. Erişim hakkın varsa Ayarlar'dan çerez uyumluluğunu açabilirsin.",
+    ),
+    (
+        &["private video", "this video is private", "is private"],
+        "PRIVATE_MEDIA",
+        "Bu video özel. Yalnızca erişim hakkın olan videoları kaydedebilirsin.",
+    ),
+    (
+        &["login required", "log in to", "login to", "requires authentication", "you need to log in", "sign in to", "use --cookies", "account cookies"],
+        "LOGIN_REQUIRED",
+        "Bu içerik oturum açmayı gerektiriyor. Erişim hakkın varsa Ayarlar'dan çerez uyumluluğunu açabilirsin.",
+    ),
+    (
+        &["available in your country", "geo restrict", "geo-restrict", "blocked it in your country", "not available from your location"],
+        "GEO_BLOCKED",
+        "Bu içerik bulunduğun bölgede kullanılamıyor.",
+    ),
+    (
+        &["unsupported url"],
+        "UNSUPPORTED_SITE",
+        "Bu bağlantı desteklenmiyor. Doğrudan tek bir video sayfasının bağlantısını kullan.",
+    ),
+    (
+        &["premieres in", "live event will begin", "this live event", "is upcoming"],
+        "MEDIA_NOT_STARTED",
+        "Yayın henüz başlamadı. Başladıktan sonra tekrar dene.",
+    ),
+    (
+        &["video unavailable", "has been removed", "no longer available", "does not exist", "http error 404", "error 404", "404 not found"],
+        "MEDIA_UNAVAILABLE",
+        "Video kaldırılmış veya artık erişilebilir değil.",
+    ),
+    (
+        &["http error 403", "403 forbidden", "error 403", "server returned 403"],
+        "ACCESS_DENIED",
+        "Kaynak erişimi reddetti veya geçici bağlantının süresi doldu (403). Videoyu yeniden getirip tekrar dene.",
+    ),
+    (
+        &["unable to extract", "nsig extraction failed", "signature extraction failed", "please report this issue", "update to the latest version", "unable to decrypt"],
+        "EXTRACTOR_OUTDATED",
+        "Medya motoru bu kaynağı çözemedi. Motorlar menüsünden yt-dlp'yi güncelleyip tekrar dene.",
+    ),
+    (
+        &["getaddrinfo", "name or service not known", "nodename nor servname", "timed out", "connection reset", "connection refused", "network is unreachable", "temporary failure in name resolution", "failed to resolve"],
+        "NETWORK_ERROR",
+        "Kaynağa bağlanılamadı. İnternet bağlantını kontrol edip tekrar dene.",
+    ),
+    (
+        &["invalid data found when processing input", "moov atom not found"],
+        "MEDIA_INVALID",
+        "Medya verisi okunamadı veya bozuk.",
+    ),
+];
+
 fn classify_failure(binary: Binary, stderr: &str) -> AppError {
-    let lower = stderr.to_ascii_lowercase();
-    if lower.contains("drm") || lower.contains("widevine") {
-        AppError::new("DRM_PROTECTED", "DRM korumalı medya indirilemez.")
-    } else if lower.contains("no space left")
-        || lower.contains("disk full")
-        || lower.contains("not enough space")
-    {
-        AppError::new("DISK_FULL", "Diskte yeterli boş alan yok.")
-    } else if lower.contains("429") || lower.contains("too many requests") {
-        AppError::new(
-            "RATE_LIMITED",
-            "Medya kaynağı çok fazla istek nedeniyle geçici olarak beklemenizi istiyor (429).",
-        )
-    } else if lower.contains("cookie")
-        && (lower.contains("locked") || lower.contains("could not copy"))
-    {
-        AppError::new(
+    let lower = stderr.to_lowercase();
+    let cookie_problem = lower.contains("cookie")
+        && (lower.contains("locked")
+            || lower.contains("could not copy")
+            || lower.contains("failed to decrypt")
+            || lower.contains("app-bound")
+            || lower.contains("permission denied"));
+    if cookie_problem && !lower.contains("drm") {
+        return AppError::new(
             "BROWSER_COOKIES_UNAVAILABLE",
-            "Tarayıcı oturumu okunamadı. Tarayıcıyı kapatıp tekrar deneyin veya çerez uyumluluğunu kapatın.",
-        )
-    } else if lower.contains("403") || lower.contains("forbidden") {
-        AppError::new(
-            "ACCESS_DENIED",
-            "Medya kaynağı erişimi reddetti veya geçici bağlantının süresi doldu (403).",
-        )
-    } else if matches!(binary, Binary::YtDlp) {
+            "Tarayıcı oturumu okunamadı. Tarayıcıyı kapatıp tekrar dene; sorun sürerse Ayarlar'da çerez kaynağı olarak cookies.txt dosyası seç.",
+        );
+    }
+    for (needles, code, message) in FAILURE_PATTERNS {
+        if needles.iter().any(|needle| lower.contains(needle)) {
+            return AppError::new(code, *message);
+        }
+    }
+    if matches!(binary, Binary::YtDlp) {
         AppError::new(
             "NO_MEDIA_FOUND",
-            "İşlem tamamlanamadı. Bağlantıyı kontrol edip tekrar deneyin.",
+            "Bu bağlantıda indirilebilir bir video bulunamadı. Bağlantıyı kontrol edip tekrar dene.",
         )
     } else {
         AppError::new("ENGINE_FAILED", "Medya işleme başarısız oldu.")
     }
+}
+
+fn stderr_tail(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    lines[lines.len().saturating_sub(20)..].join(" | ")
 }
 
 pub async fn versions(app: &AppHandle) -> Result<EngineVersions, AppError> {
@@ -389,19 +490,55 @@ fn managed_engine_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
 
 fn bundled_binary_path(_app: &AppHandle, binary: Binary) -> Option<PathBuf> {
     let filename = format!("{}.exe", binary.name());
-    let packaged = std::env::current_exe().ok()?.parent()?.join(&filename);
-    if packaged.is_file() {
-        return Some(packaged);
-    }
-    let local = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("binaries")
-        .join(filename);
-    local.is_file().then_some(local)
+    engine_dirs()
+        .into_iter()
+        .map(|directory| directory.join(&filename))
+        .find(|path| path.is_file())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::valid_yt_dlp_version;
+    use super::{classify_failure, valid_yt_dlp_version, Binary};
+
+    #[test]
+    fn classifies_engine_failures_into_actionable_codes() {
+        let cases = [
+            ("ERROR: [site] abc: Sign in to confirm your age", "AGE_RESTRICTED"),
+            ("ERROR: [site] abc: Sign in to confirm you’re not a bot", "BOT_CHECK"),
+            ("ERROR: [site] abc: Private video. Sign in if you've been granted access", "PRIVATE_MEDIA"),
+            ("ERROR: [site] abc: This content isn't available, login required", "LOGIN_REQUIRED"),
+            ("ERROR: The uploader has not made this video available in your country", "GEO_BLOCKED"),
+            ("ERROR: Unsupported URL: https://example.org/", "UNSUPPORTED_SITE"),
+            ("ERROR: [site] abc: Video unavailable", "MEDIA_UNAVAILABLE"),
+            ("ERROR: unable to download video data: HTTP Error 403: Forbidden", "ACCESS_DENIED"),
+            ("ERROR: unable to download webpage: HTTP Error 429: Too Many Requests", "RATE_LIMITED"),
+            ("ERROR: [site] abc: Unable to extract initial data; please report this issue", "EXTRACTOR_OUTDATED"),
+            ("ERROR: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>", "NETWORK_ERROR"),
+            ("ERROR: This video is DRM protected", "DRM_PROTECTED"),
+            ("ERROR: Could not copy Chrome cookie database", "BROWSER_COOKIES_UNAVAILABLE"),
+            ("ERROR: something else entirely", "NO_MEDIA_FOUND"),
+        ];
+        for (stderr, expected) in cases {
+            assert_eq!(
+                classify_failure(Binary::YtDlp, stderr).code,
+                expected,
+                "{stderr}"
+            );
+        }
+        assert_eq!(
+            classify_failure(
+                Binary::Ffmpeg,
+                "Server returned 403 Forbidden (access denied)"
+            )
+            .code,
+            "ACCESS_DENIED"
+        );
+        assert_eq!(
+            classify_failure(Binary::Ffmpeg, "frame=4030 size=1024kB").code,
+            "ENGINE_FAILED",
+            "numbers that merely contain 403 must not be treated as HTTP 403"
+        );
+    }
 
     #[test]
     fn validates_stable_yt_dlp_versions() {

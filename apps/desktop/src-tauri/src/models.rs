@@ -58,6 +58,16 @@ pub struct ResolvedMedia {
     pub is_live: bool,
     pub refresh_url: Option<String>,
     pub request_context: RequestContext,
+    /// A low-resolution stream used only to render preview frames locally.
+    pub preview: Option<PreviewSource>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreviewSource {
+    pub url: String,
+    #[serde(default)]
+    pub request_context: RequestContext,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +84,9 @@ pub struct DownloadRequest {
     pub known_duration_ms: Option<u64>,
     #[serde(default)]
     pub request_context: RequestContext,
+    /// Pick a free `name_N.mp4` when the destination exists at save time.
+    #[serde(default)]
+    pub auto_rename: bool,
 }
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize)]
@@ -101,14 +114,18 @@ pub struct ClipRequest {
     pub known_duration_ms: Option<u64>,
     #[serde(default)]
     pub request_context: RequestContext,
+    #[serde(default)]
+    pub auto_rename: bool,
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CookieBrowser {
     Brave,
     Chrome,
     Edge,
+    /// A Netscape `cookies.txt` file chosen by the user.
+    File,
 }
 
 impl CookieBrowser {
@@ -117,6 +134,7 @@ impl CookieBrowser {
             Self::Brave => "brave",
             Self::Chrome => "chrome",
             Self::Edge => "edge",
+            Self::File => "file",
         }
     }
 }
@@ -126,6 +144,8 @@ impl CookieBrowser {
 pub struct CompatibilitySettings {
     pub cookies_enabled: bool,
     pub cookie_browser: CookieBrowser,
+    #[serde(default)]
+    pub cookie_file: Option<String>,
     pub remote_ejs_enabled: bool,
     pub po_token_providers_enabled: bool,
 }
@@ -135,21 +155,66 @@ impl Default for CompatibilitySettings {
         Self {
             cookies_enabled: false,
             cookie_browser: CookieBrowser::Chrome,
+            cookie_file: None,
             remote_ejs_enabled: false,
             po_token_providers_enabled: false,
         }
     }
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
+
+fn settings_schema_version() -> u32 {
+    SETTINGS_SCHEMA_VERSION
+}
+
+fn enabled() -> bool {
+    true
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum FilenameTemplate {
+    #[default]
+    TitleDate,
+    Title,
+    SourceTitleDate,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppSettings {
+    #[serde(default = "settings_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub onboarding_completed: bool,
+    /// The user confirmed the usage terms (only content they are entitled to).
+    #[serde(default)]
+    pub terms_accepted: bool,
     #[serde(default)]
     pub quick_profile: QuickProfileSettings,
     #[serde(default)]
     pub compatibility: CompatibilitySettings,
+    #[serde(default)]
+    pub filename_template: FilenameTemplate,
+    /// Once a day, ask the public release pages whether a newer Lipit or
+    /// media engine exists. Nothing is downloaded without confirmation.
+    #[serde(default = "enabled")]
+    pub update_checks_enabled: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            schema_version: SETTINGS_SCHEMA_VERSION,
+            onboarding_completed: false,
+            terms_accepted: false,
+            quick_profile: QuickProfileSettings::default(),
+            compatibility: CompatibilitySettings::default(),
+            filename_template: FilenameTemplate::default(),
+            update_checks_enabled: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -209,7 +274,7 @@ pub struct HistoryEntry {
     pub clip_mode: Option<ClipMode>,
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum JobKind {
     Download,

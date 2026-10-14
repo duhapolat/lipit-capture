@@ -2,17 +2,65 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use tauri::{AppHandle, Manager};
 use url::Url;
 
 use crate::{
-    binary,
-    models::{AppError, AppSettings, DestinationMode, RequestContext},
+    binary, log,
+    models::{
+        AppError, AppSettings, CookieBrowser, DestinationMode, RequestContext,
+        SETTINGS_SCHEMA_VERSION,
+    },
 };
 
 const SETTINGS_FILE: &str = "settings.json";
+const MAX_COOKIE_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// One-time messages for the UI, e.g. after a damaged file was set aside.
+static NOTICES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn push_notice(message: impl Into<String>) {
+    if let Ok(mut notices) = NOTICES.lock() {
+        let message = message.into();
+        if !notices.contains(&message) {
+            notices.push(message);
+        }
+    }
+}
+
+pub fn take_notices() -> Vec<String> {
+    NOTICES
+        .lock()
+        .map(|mut notices| std::mem::take(&mut *notices))
+        .unwrap_or_default()
+}
+
+/// Moves an unreadable data file aside so the app keeps working with defaults.
+pub fn quarantine(path: &Path, label: &str) {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("data");
+    let backup = path.with_file_name(format!("{stem}.corrupt-{stamp}.json"));
+    if fs::rename(path, &backup).is_ok() {
+        log::warn(format!(
+            "{label} dosyası okunamadı; {} olarak yedeklendi.",
+            backup.display()
+        ));
+        push_notice(format!(
+            "{label} dosyası okunamadığı için yedeklendi ve varsayılanlar yüklendi. Yedek: {}",
+            backup.display()
+        ));
+    }
+}
 
 pub fn load(app: &AppHandle) -> Result<AppSettings, AppError> {
     let path = settings_path(app)?;
@@ -21,21 +69,49 @@ pub fn load(app: &AppHandle) -> Result<AppSettings, AppError> {
     }
     let bytes =
         fs::read(&path).map_err(|_| AppError::new("SETTINGS_UNAVAILABLE", "Ayarlar okunamadı."))?;
-    let mut value: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|_| AppError::new("SETTINGS_INVALID", "Ayar dosyası geçersiz."))?;
-    if value
-        .pointer("/compatibility/cookieBrowser")
-        .and_then(|item| item.as_str())
-        == Some("firefox")
+    match parse(&bytes) {
+        Some(settings) => Ok(settings),
+        None => {
+            quarantine(&path, "Ayar");
+            Ok(AppSettings::default())
+        }
+    }
+}
+
+fn parse(bytes: &[u8]) -> Option<AppSettings> {
+    let mut value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    migrate(&mut value);
+    serde_json::from_value(value).ok()
+}
+
+/// Upgrades older settings files. Each block handles one schema version.
+fn migrate(value: &mut serde_json::Value) {
+    let version = value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    if version < 2
+        && value
+            .pointer("/compatibility/cookieBrowser")
+            .and_then(|item| item.as_str())
+            == Some("firefox")
     {
+        // Development builds could store Firefox, which Lipit no longer supports.
         value["compatibility"]["cookieBrowser"] = serde_json::Value::String("chrome".into());
     }
-    serde_json::from_value(value)
-        .map_err(|_| AppError::new("SETTINGS_INVALID", "Ayar dosyası geçersiz."))
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "schemaVersion".into(),
+            serde_json::Value::from(SETTINGS_SCHEMA_VERSION),
+        );
+    }
 }
 
 pub fn save(app: &AppHandle, settings: &AppSettings) -> Result<(), AppError> {
     validate_quick_profile(settings)?;
+    validate_cookie_source(settings)?;
+    let mut settings = settings.clone();
+    settings.schema_version = SETTINGS_SCHEMA_VERSION;
     let path = settings_path(app)?;
     let parent = path
         .parent()
@@ -49,7 +125,7 @@ pub fn save(app: &AppHandle, settings: &AppSettings) -> Result<(), AppError> {
     }
     let mut temporary = tempfile::NamedTempFile::new_in(parent)
         .map_err(|_| AppError::new("SETTINGS_UNAVAILABLE", "Ayarlar kaydedilemedi."))?;
-    serde_json::to_writer_pretty(&mut temporary, settings)
+    serde_json::to_writer_pretty(&mut temporary, &settings)
         .map_err(|_| AppError::new("SETTINGS_UNAVAILABLE", "Ayarlar kaydedilemedi."))?;
     temporary
         .flush()
@@ -93,25 +169,29 @@ pub fn quick_output_path(app: &AppHandle, suggested_filename: &str) -> Result<St
             "Önerilen dosya adı geçersiz.",
         ));
     }
-    let stem = filename
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("video");
-    for suffix in 0..10_000_u32 {
-        let name = if suffix == 0 {
-            suggested_filename.to_owned()
-        } else {
-            format!("{stem}_{suffix}.mp4")
-        };
-        let candidate = directory.join(name);
-        if !candidate.exists() {
-            return Ok(candidate.to_string_lossy().into_owned());
-        }
-    }
-    Err(AppError::new(
-        "FILE_EXISTS",
-        "İndirme klasöründe kullanılabilir bir dosya adı oluşturulamadı.",
-    ))
+    free_path(&directory.join(suggested_filename))
+        .map(|path| path.to_string_lossy().into_owned())
+        .ok_or_else(|| {
+            AppError::new(
+                "FILE_EXISTS",
+                "İndirme klasöründe kullanılabilir bir dosya adı oluşturulamadı.",
+            )
+        })
+}
+
+/// Returns `path` or the first `stem_N.mp4` sibling that does not exist yet.
+pub fn free_path(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let stem = path.file_stem().and_then(|value| value.to_str())?;
+    (0..10_000_u32)
+        .map(|suffix| {
+            if suffix == 0 {
+                path.to_path_buf()
+            } else {
+                parent.join(format!("{stem}_{suffix}.mp4"))
+            }
+        })
+        .find(|candidate| !candidate.exists())
 }
 
 pub fn valid_output_filename(filename: &str) -> bool {
@@ -203,6 +283,30 @@ fn validate_quick_profile(settings: &AppSettings) -> Result<(), AppError> {
     Ok(())
 }
 
+fn validate_cookie_source(settings: &AppSettings) -> Result<(), AppError> {
+    let compatibility = &settings.compatibility;
+    if compatibility.cookies_enabled && compatibility.cookie_browser == CookieBrowser::File {
+        cookie_file(compatibility.cookie_file.as_deref())?;
+    }
+    Ok(())
+}
+
+fn cookie_file(raw: Option<&str>) -> Result<PathBuf, AppError> {
+    let path = raw
+        .map(PathBuf::from)
+        .ok_or_else(|| AppError::new("INVALID_SETTINGS", "Çerez dosyası seçilmedi."))?;
+    let valid = path.is_absolute()
+        && fs::metadata(&path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_COOKIE_FILE_BYTES);
+    if !valid {
+        return Err(AppError::new(
+            "INVALID_SETTINGS",
+            "Çerez dosyası bulunamadı veya 10 MB sınırını aşıyor.",
+        ));
+    }
+    Ok(path)
+}
+
 pub fn validate_request_context(context: &RequestContext) -> Result<(), AppError> {
     validate_optional_url(context.referer.as_deref(), 4096)?;
     validate_optional_url(context.origin.as_deref(), 512)?;
@@ -210,16 +314,33 @@ pub fn validate_request_context(context: &RequestContext) -> Result<(), AppError
     Ok(())
 }
 
-pub fn yt_dlp_args(app: &AppHandle, context: &RequestContext) -> Result<Vec<String>, AppError> {
+#[derive(Clone, Copy)]
+pub enum EngineStage {
+    /// Metadata extraction. Must finish within the resolve deadline.
+    Resolve,
+    /// Transfers, which may retry for longer.
+    Download,
+}
+
+pub fn yt_dlp_args(
+    app: &AppHandle,
+    context: &RequestContext,
+    stage: EngineStage,
+) -> Result<Vec<String>, AppError> {
     validate_request_context(context)?;
     let settings = load(app)?;
     let mut args = request_header_args(context);
-    args.extend(rate_limit_args());
+    args.extend(rate_limit_args(stage));
     if settings.compatibility.cookies_enabled {
-        args.extend([
-            "--cookies-from-browser".into(),
-            settings.compatibility.cookie_browser.as_str().into(),
-        ]);
+        if settings.compatibility.cookie_browser == CookieBrowser::File {
+            let path = cookie_file(settings.compatibility.cookie_file.as_deref())?;
+            args.extend(["--cookies".into(), path.to_string_lossy().into_owned()]);
+        } else {
+            args.extend([
+                "--cookies-from-browser".into(),
+                settings.compatibility.cookie_browser.as_str().into(),
+            ]);
+        }
     }
     if let Some(deno) = binary::deno_path(app) {
         args.extend([
@@ -243,23 +364,39 @@ pub fn yt_dlp_args(app: &AppHandle, context: &RequestContext) -> Result<Vec<Stri
     Ok(args)
 }
 
-fn rate_limit_args() -> Vec<String> {
-    vec![
-        "--sleep-requests".into(),
-        "0.75".into(),
-        "--retries".into(),
-        "5".into(),
-        "--fragment-retries".into(),
-        "5".into(),
-        "--extractor-retries".into(),
-        "3".into(),
-        "--retry-sleep".into(),
-        "http:exp=1:8".into(),
-        "--retry-sleep".into(),
-        "extractor:exp=1:8".into(),
-        "--retry-sleep".into(),
-        "fragment:exp=1:4".into(),
-    ]
+fn rate_limit_args(stage: EngineStage) -> Vec<String> {
+    match stage {
+        // Resolution has a fixed deadline. A short, bounded retry keeps a real
+        // error visible instead of turning every slow source into a timeout.
+        EngineStage::Resolve => vec![
+            "--sleep-requests".into(),
+            "0.75".into(),
+            "--retries".into(),
+            "2".into(),
+            "--extractor-retries".into(),
+            "1".into(),
+            "--retry-sleep".into(),
+            "http:exp=1:4".into(),
+            "--retry-sleep".into(),
+            "extractor:exp=1:4".into(),
+        ],
+        EngineStage::Download => vec![
+            "--sleep-requests".into(),
+            "0.75".into(),
+            "--retries".into(),
+            "5".into(),
+            "--fragment-retries".into(),
+            "5".into(),
+            "--extractor-retries".into(),
+            "3".into(),
+            "--retry-sleep".into(),
+            "http:exp=1:8".into(),
+            "--retry-sleep".into(),
+            "extractor:exp=1:8".into(),
+            "--retry-sleep".into(),
+            "fragment:exp=1:4".into(),
+        ],
+    }
 }
 
 pub fn ffmpeg_input_args(context: &RequestContext) -> Result<Vec<String>, AppError> {
@@ -319,7 +456,7 @@ fn validate_optional_url(value: Option<&str>, max_len: usize) -> Result<(), AppE
     Ok(())
 }
 
-fn validate_header_value(value: Option<&str>, max_len: usize) -> Result<(), AppError> {
+pub fn validate_header_value(value: Option<&str>, max_len: usize) -> Result<(), AppError> {
     if value.is_some_and(|value| {
         value.is_empty()
             || value.len() > max_len
@@ -369,7 +506,7 @@ mod tests {
 
     #[test]
     fn rate_limit_policy_backs_off_without_unbounded_retries() {
-        let args = rate_limit_args();
+        let args = rate_limit_args(EngineStage::Download);
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--sleep-requests", "0.75"]));
@@ -378,6 +515,10 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--retry-sleep", "http:exp=1:8"]));
         assert!(!args.iter().any(|value| value == "infinite"));
+        let resolve = rate_limit_args(EngineStage::Resolve);
+        assert!(resolve
+            .windows(2)
+            .any(|pair| pair == ["--extractor-retries", "1"]));
     }
 
     #[test]
@@ -398,5 +539,32 @@ mod tests {
         assert!(!valid_output_filename("video.mp4."));
         assert!(valid_output_filename("CON_2026-09-23.mp4"));
         assert!(valid_output_filename("İstanbul 🎬_2026-09-23.mp4"));
+    }
+
+    #[test]
+    fn migrates_legacy_settings_and_rejects_garbage() {
+        let legacy = br#"{"onboardingCompleted":true,"quickProfile":{"destinationMode":"ask","downloadDirectory":null,"clipDurationMs":30000},"compatibility":{"cookiesEnabled":false,"cookieBrowser":"firefox","remoteEjsEnabled":false,"poTokenProvidersEnabled":false}}"#;
+        let settings = parse(legacy).expect("legacy settings must load");
+        assert!(settings.onboarding_completed);
+        assert!(!settings.terms_accepted);
+        assert!(settings.update_checks_enabled);
+        assert_eq!(settings.schema_version, SETTINGS_SCHEMA_VERSION);
+        assert!(matches!(
+            settings.compatibility.cookie_browser,
+            CookieBrowser::Chrome
+        ));
+        assert!(parse(b"{not json").is_none());
+    }
+
+    #[test]
+    fn finds_a_free_sibling_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("clip.mp4");
+        assert_eq!(free_path(&first).unwrap(), first);
+        std::fs::write(&first, b"x").unwrap();
+        assert_eq!(
+            free_path(&first).unwrap(),
+            directory.path().join("clip_1.mp4")
+        );
     }
 }

@@ -1,6 +1,6 @@
 {
   "name": "lipit-capture",
-  "version": "1.0.0-beta.5",
+  "version": "1.0.0-beta.6",
   "license": "GPL-3.0-or-later",
   "private": true,
   "scripts": {
@@ -22,8 +22,9 @@
     "licenses:generate": "node scripts/generate-third-party-licenses.mjs",
     "bundle:windows": "node scripts/bundle-windows.mjs",
     "package:windows": "node scripts/bundle-windows.mjs --package-only",
-    "check:beta": "npm run prepare:resources && npm run check:security && npm --prefix apps/desktop audit && npm run test:rust && npm run check:rust && npm run test:extension && npm run check:ui",
+    "check:beta": "npm run prepare:resources && npm run check:security && npm --prefix apps/desktop audit && npm run test:rust && npm run check:rust && npm run test:extension && npm run test:ui && npm run check:ui",
     "check:beta:runtime": "npm run test:native && npm run test:widget && npm run test:resolve-ui && npm run test:pipeline",
-    "check:release": "npm run check:beta && npm run build && npm run check:beta:runtime"
+    "check:release": "npm run check:beta && npm run build && npm run check:beta:runtime",
+    "test:ui": "node --test apps/desktop/src/lib/format.test.ts"
   }
 }

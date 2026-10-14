@@ -28,6 +28,13 @@ declare namespace LipitProtocol {
     type: "MEDIA_DETECTED";
     action: CaptureAction;
     candidate: MediaCandidate;
+    extensionVersion?: string;
+  }
+
+  interface HelloMessage {
+    protocolVersion: 1;
+    type: "HELLO";
+    extensionVersion: string;
   }
 
   interface NativeResponse {

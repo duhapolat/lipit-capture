@@ -1,0 +1,48 @@
+name: Hata bildirimi
+description: Lipit'te beklenmeyen bir davranış bildir
+labels: ["hata"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Güvenlik açıklarını burada bildirme; SECURITY.md'deki özel bildirim yolunu kullan.
+        Video bağlantısı, çerez, kullanıcı adı veya indirilen medya paylaşma.
+  - type: textarea
+    id: what
+    attributes:
+      label: Ne oldu?
+      description: Beklediğin ve gerçekleşen davranış.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Yeniden oluşturma adımları
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: error
+    attributes:
+      label: Hata mesajı veya kodu
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Tanılama bilgisi
+      description: Ayarlar › "Tanılamayı kopyala" çıktısını yapıştır (bağlantı ve dosya yolu içermez).
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Günlük (isteğe bağlı)
+      description: Ayarlar › "Günlük klasörünü aç" › lipit.log dosyasının ilgili satırları. Adresler alan adına indirilmiş, kullanıcı klasörü maskelenmiştir.
+      render: text
+  - type: input
+    id: windows
+    attributes:
+      label: Windows sürümü
+      placeholder: Windows 11 24H2

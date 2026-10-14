@@ -7,10 +7,14 @@ use url::Url;
 
 use crate::{
     binary::{self, Binary},
-    models::{AppError, QualityProfile, RequestContext, ResolvedMedia},
+    models::{AppError, PreviewSource, QualityProfile, RequestContext, ResolvedMedia},
     native_messaging::{MediaCandidate, MediaProtocol},
     settings, url_safety,
 };
+
+/// Upper bound for one metadata extraction. Bounded retries (see
+/// `settings::EngineStage::Resolve`) fit inside it on slow connections.
+pub const RESOLVE_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub fn validate_url(raw: &str) -> Result<Url, AppError> {
     url_safety::validate_public_http_url(raw, 4096)
@@ -74,7 +78,7 @@ fn with_candidate_metadata(mut media: ResolvedMedia, candidate: &MediaCandidate)
     if media.duration_ms.is_none() {
         media.duration_ms = preferred_duration(media.duration_ms, candidate.duration_ms);
     }
-    if media.title == "Untitled media" {
+    if media.title == "Adsız video" {
         if let Some(title) = candidate
             .page_title
             .as_deref()
@@ -107,6 +111,7 @@ pub async fn resolve_with_context(
         ));
     }
     settings::validate_request_context(context)?;
+    url_safety::ensure_public_resolution(&url).await?;
     let mut args = vec![
         "--ignore-config".into(),
         "--no-playlist".into(),
@@ -114,20 +119,27 @@ pub async fn resolve_with_context(
         "--skip-download".into(),
         "--no-warnings".into(),
     ];
-    args.extend(settings::yt_dlp_args(app, context)?);
+    args.extend(settings::yt_dlp_args(
+        app,
+        context,
+        settings::EngineStage::Resolve,
+    )?);
     args.extend(["--".into(), url.to_string()]);
     let output = match binary::run(
         app,
         Binary::YtDlp,
         &args,
-        Duration::from_secs(20),
+        RESOLVE_TIMEOUT,
         cancel,
         |_, _| {},
     )
     .await
     {
         Ok(output) => output,
-        Err(error) if error.code == "NO_MEDIA_FOUND" && is_direct_media_path(url.path()) => {
+        Err(error)
+            if matches!(error.code, "NO_MEDIA_FOUND" | "UNSUPPORTED_SITE")
+                && is_direct_media_path(url.path()) =>
+        {
             return Ok(direct_media(&url, None, None, context.clone(), None));
         }
         Err(error) => return Err(error),
@@ -156,7 +168,7 @@ pub async fn resolve_with_context(
         .get("title")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
-        .unwrap_or("Untitled media");
+        .unwrap_or("Adsız video");
     let duration_ms = value
         .get("duration")
         .and_then(Value::as_f64)
@@ -173,6 +185,7 @@ pub async fn resolve_with_context(
         .and_then(|s| url_safety::validate_public_http_url(s, 4096).ok())
         .map(|u| u.to_string());
     let profiles = normalize_profiles(&value);
+    let preview = preview_source(&value);
     Ok(ResolvedMedia {
         url: url.to_string(),
         title: title.to_owned(),
@@ -188,7 +201,74 @@ pub async fn resolve_with_context(
         is_live,
         refresh_url: Some(url.to_string()),
         request_context: context.clone(),
+        preview,
     })
+}
+
+/// Picks a small, DRM-free video format for local preview frames. Progressive
+/// HTTP(S) files are preferred over HLS because seeking them is much faster.
+fn preview_source(value: &Value) -> Option<PreviewSource> {
+    let formats = value.get("formats").and_then(Value::as_array)?;
+    formats
+        .iter()
+        .filter(|format| format.get("has_drm").and_then(Value::as_bool) != Some(true))
+        .filter(|format| {
+            format
+                .get("vcodec")
+                .and_then(Value::as_str)
+                .is_some_and(|codec| codec != "none")
+        })
+        .filter_map(|format| {
+            let url = format.get("url").and_then(Value::as_str)?;
+            let url = url_safety::validate_public_http_url(url, 8192).ok()?;
+            let protocol = format
+                .get("protocol")
+                .and_then(Value::as_str)
+                .unwrap_or("https");
+            let protocol_rank = match protocol {
+                "https" | "http" => 0,
+                "m3u8_native" | "m3u8" => 1,
+                _ => return None,
+            };
+            let height = format.get("height").and_then(Value::as_u64).unwrap_or(720);
+            // 240-480p is enough for a thumbnail; larger formats cost bandwidth.
+            let size_rank = if (240..=480).contains(&height) { 0 } else { 1 };
+            Some((
+                (protocol_rank, size_rank, height.abs_diff(360)),
+                url,
+                format,
+            ))
+        })
+        .min_by_key(|(rank, _, _)| *rank)
+        .map(|(_, url, format)| PreviewSource {
+            url: url.to_string(),
+            request_context: format_request_context(format),
+        })
+}
+
+fn format_request_context(format: &Value) -> RequestContext {
+    let header = |name: &str| {
+        format
+            .get("http_headers")
+            .and_then(Value::as_object)
+            .and_then(|headers| {
+                headers
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                    .and_then(|(_, value)| value.as_str())
+                    .map(str::to_owned)
+            })
+    };
+    let context = RequestContext {
+        referer: header("Referer"),
+        origin: header("Origin"),
+        user_agent: header("User-Agent"),
+    };
+    if settings::validate_request_context(&context).is_ok() {
+        context
+    } else {
+        RequestContext::default()
+    }
 }
 
 fn is_known_non_media_page(url: &Url) -> bool {
@@ -260,6 +340,11 @@ fn direct_media(
     let is_manifest = [".m3u8", ".m3u", ".mpd"]
         .iter()
         .any(|extension| lower_path.ends_with(extension));
+    let preview = (!is_manifest || lower_path.ends_with(".m3u8") || lower_path.ends_with(".m3u"))
+        .then(|| PreviewSource {
+            url: url.to_string(),
+            request_context: request_context.clone(),
+        });
     ResolvedMedia {
         url: url.to_string(),
         title: suggested_title
@@ -279,6 +364,7 @@ fn direct_media(
         is_live: duration_ms.is_none() && is_manifest,
         refresh_url,
         request_context,
+        preview,
     }
 }
 
@@ -407,7 +493,7 @@ mod tests {
 
     use super::{
         direct_media, has_video_stream, is_direct_media_path, is_known_non_media_page,
-        normalize_profiles, preferred_duration,
+        normalize_profiles, preferred_duration, preview_source,
     };
     use crate::models::RequestContext;
     use url::Url;
@@ -453,7 +539,7 @@ mod tests {
     #[test]
     fn rejects_youtube_profile_before_starting_the_extractor() {
         assert!(is_known_non_media_page(
-            &Url::parse("https://www.youtube.com/@BugraSisman").unwrap()
+            &Url::parse("https://www.youtube.com/@example-channel").unwrap()
         ));
         assert!(!is_known_non_media_page(
             &Url::parse("https://www.youtube.com/watch?v=video").unwrap()
@@ -500,6 +586,26 @@ mod tests {
             ]
         });
         assert_eq!(normalize_profiles(&value)[1].label, "1080p");
+    }
+
+    #[test]
+    fn prefers_small_progressive_formats_for_preview_frames() {
+        let value = json!({
+            "formats": [
+                { "url": "https://cdn.example.org/1080.mp4", "protocol": "https", "vcodec": "avc1", "height": 1080 },
+                { "url": "https://cdn.example.org/360.m3u8", "protocol": "m3u8_native", "vcodec": "avc1", "height": 360 },
+                { "url": "https://cdn.example.org/360.mp4", "protocol": "https", "vcodec": "avc1", "height": 360,
+                  "http_headers": { "User-Agent": "Test/1.0", "Referer": "https://www.example.org/" } },
+                { "url": "https://cdn.example.org/audio.m4a", "protocol": "https", "vcodec": "none" },
+                { "url": "http://127.0.0.1/local.mp4", "protocol": "http", "vcodec": "avc1", "height": 360 }
+            ]
+        });
+        let preview = preview_source(&value).expect("a preview format");
+        assert_eq!(preview.url, "https://cdn.example.org/360.mp4");
+        assert_eq!(
+            preview.request_context.user_agent.as_deref(),
+            Some("Test/1.0")
+        );
     }
 
     #[test]

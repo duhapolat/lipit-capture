@@ -1,0 +1,55 @@
+name: Nightly engine smoke test
+
+# Media sites change often. This job resolves an openly licensed sample video
+# with the bundled engine every night, so a breaking site change is noticed
+# before users report it. On failure it opens (or updates) one tracking issue.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Fetch verified media engines
+        run: node scripts/prepare-binaries.mjs x86_64-pc-windows-msvc
+
+      - name: Resolve the openly licensed sample video
+        id: resolve
+        shell: pwsh
+        run: |
+          $url = node -e "import('./scripts/test-media-source.mjs').then(m => console.log(m.testMediaUrl))"
+          $bin = "apps/desktop/src-tauri/binaries"
+          & "$bin/yt-dlp.exe" --ignore-config --no-warnings --skip-download --dump-single-json `
+            --js-runtimes "deno:$bin/deno.exe" -- $url | Out-File metadata.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "yt-dlp could not resolve the sample video" }
+          $json = Get-Content metadata.json -Raw | ConvertFrom-Json
+          if (-not $json.formats -or $json.formats.Count -lt 1) { throw "No formats returned" }
+          Write-Output "Resolved: $($json.title) with $($json.formats.Count) formats"
+
+      - name: Report failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $title = "Gece motor testi başarısız"
+          $body = "Paketlenen yt-dlp örnek videoyu çözümleyemedi. Çalıştırma: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $existing = gh issue list --state open --search "$title in:title" --json number --jq '.[0].number'
+          if ($existing) { gh issue comment $existing --body $body }
+          else { gh issue create --title $title --body $body --label "motor" 2>$null; if ($LASTEXITCODE -ne 0) { gh issue create --title $title --body $body } }

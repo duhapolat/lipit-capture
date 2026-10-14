@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Güvenlik açığı bildir
+    url: https://github.com/duhapolat/lipit-capture/security/advisories/new
+    about: Güvenlik açıklarını herkese açık olmayan bu kanaldan bildir.
+  - name: Sık sorulan sorular
+    url: https://github.com/duhapolat/lipit-capture/blob/main/docs/SSS.md
+    about: Kurulum ve sık karşılaşılan hatalar için önce buraya bak.

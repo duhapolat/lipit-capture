@@ -42,8 +42,10 @@ function isCaptureRequest(value: unknown): value is CaptureRequest {
   );
 }
 
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+
 function sendToNative(
-  message: LipitProtocol.MediaDetectedMessage,
+  message: LipitProtocol.MediaDetectedMessage | LipitProtocol.HelloMessage,
 ): Promise<LipitProtocol.NativeResponse> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -91,6 +93,7 @@ async function captureMedia(
     type: "MEDIA_DETECTED",
     action: request.action,
     candidate,
+    extensionVersion: EXTENSION_VERSION,
   };
   const response = await sendToNative(payload);
   if (response.type === "MEDIA_ACCEPTED" && response.candidateId) {
@@ -122,6 +125,21 @@ chrome.webRequest.onHeadersReceived.addListener(
   { urls: ["http://*/*", "https://*/*"] },
   ["responseHeaders"],
 );
+
+// Lets the desktop app show "extension connected" and detect version
+// mismatches. The message carries only the extension's version number.
+function announceToDesktop(): void {
+  void sendToNative({
+    protocolVersion: PROTOCOL_VERSION,
+    type: "HELLO",
+    extensionVersion: EXTENSION_VERSION,
+  }).catch(() => {
+    // The desktop app may not be installed yet; the setup guide covers this.
+  });
+}
+
+chrome.runtime.onInstalled.addListener(announceToDesktop);
+chrome.runtime.onStartup.addListener(announceToDesktop);
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void candidateStore.clearTab(tabId);

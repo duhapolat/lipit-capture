@@ -36,6 +36,46 @@ pub fn validate_public_http_url(raw: &str, max_len: usize) -> Result<Url, AppErr
     Ok(url)
 }
 
+/// Resolves the host and rejects names that point at loopback, private or
+/// reserved addresses (e.g. public DNS names that resolve to 127.0.0.1).
+///
+/// This narrows, but cannot fully close, DNS rebinding: the media engine does
+/// its own lookup later. Full isolation needs a sandboxed network helper.
+pub async fn ensure_public_resolution(url: &Url) -> Result<(), AppError> {
+    let Some(Host::Domain(domain)) = url.host() else {
+        return Ok(());
+    };
+    let port = url.port_or_known_default().unwrap_or(443);
+    let lookup = tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        tokio::net::lookup_host((domain.to_owned(), port)),
+    )
+    .await;
+    let addresses: Vec<std::net::SocketAddr> = match lookup {
+        Ok(Ok(addresses)) => addresses.collect(),
+        _ => {
+            return Err(AppError::new(
+                "NETWORK_ERROR",
+                "Alan adı çözümlenemedi. İnternet bağlantını kontrol edip tekrar dene.",
+            ))
+        }
+    };
+    if addresses.iter().any(|address| !public_ip(address.ip())) {
+        return Err(AppError::new(
+            "UNSAFE_URL",
+            "Bu alan adı yerel veya özel bir ağ adresine yönleniyor; güvenlik nedeniyle kullanılamaz.",
+        ));
+    }
+    Ok(())
+}
+
+fn public_ip(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(address) => public_ipv4(address),
+        std::net::IpAddr::V6(address) => public_ipv6(address),
+    }
+}
+
 fn invalid_url() -> AppError {
     AppError::new("INVALID_URL", "Geçerli bir medya adresi girin.")
 }
@@ -98,7 +138,7 @@ mod tests {
 
     #[test]
     fn accepts_public_web_addresses() {
-        assert!(validate_public_http_url("https://www.youtube.com/watch?v=test", 4096).is_ok());
+        assert!(validate_public_http_url("https://media.example.org/watch?v=test", 4096).is_ok());
         assert!(validate_public_http_url("https://1.1.1.1/video.mp4", 4096).is_ok());
     }
 
@@ -131,5 +171,13 @@ mod tests {
                 .code,
             "UNSAFE_URL"
         );
+    }
+
+    #[test]
+    fn classifies_resolved_addresses() {
+        assert!(!public_ip("127.0.0.1".parse().unwrap()));
+        assert!(!public_ip("10.1.2.3".parse().unwrap()));
+        assert!(!public_ip("::1".parse().unwrap()));
+        assert!(public_ip("1.1.1.1".parse().unwrap()));
     }
 }

@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -13,6 +15,13 @@ const hostPath = resolve(
   "lipit-native-host.exe",
 );
 const debugPort = 9333;
+// The browser inbox lives under %APPDATA%, so pointing APPDATA at a temporary
+// folder keeps the test's request out of the developer's real inbox. Tauri
+// resolves its own settings folder through Windows known folders, so the
+// widget must render whether or not the real profile has finished setup.
+const runRoot = join(tmpdir(), `lipit-widget-test-${process.pid}-${Date.now()}`);
+const appData = join(runRoot, "appdata");
+mkdirSync(appData, { recursive: true });
 
 function desktopRunning() {
   const result = spawnSync(
@@ -151,6 +160,7 @@ const request = {
 const host = spawn(hostPath, [], {
   env: {
     ...process.env,
+    APPDATA: appData,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${debugPort}`,
   },
   stdio: ["pipe", "pipe", "pipe"],
@@ -195,4 +205,5 @@ try {
     windowsHide: true,
   });
   await waitForDesktopExit();
+  if (dirname(runRoot) === tmpdir()) rmSync(runRoot, { recursive: true, force: true });
 }

@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { testMediaUrl } from "./test-media-source.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const desktopPath = resolve(
@@ -125,7 +126,7 @@ try {
         throw new Error("Resolver form not found");
       }
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-      setter.call(input, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+      setter.call(input, ${JSON.stringify(testMediaUrl)});
       input.dispatchEvent(new Event("input", { bubbles: true }));
       form.requestSubmit();
       return true;

@@ -9,6 +9,9 @@ interface LipitRuntimeError {
 
 interface LipitChromeRuntime {
   lastError?: LipitRuntimeError;
+  getManifest(): { version: string };
+  onInstalled: { addListener(listener: () => void): void };
+  onStartup: { addListener(listener: () => void): void };
   sendMessage<TResponse>(message: unknown, callback: (response: TResponse) => void): void;
   sendNativeMessage<TResponse>(
     application: string,

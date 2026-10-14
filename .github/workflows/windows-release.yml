@@ -6,8 +6,10 @@ on:
     tags:
       - "v*"
 
+# Least privilege: building (which runs third-party install scripts) only gets
+# read access. Only the small publish job can write releases.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-release-${{ github.ref }}
@@ -60,11 +62,43 @@ jobs:
       - name: Build application and native host
         run: npm run build
 
+      - name: Verify no build-machine paths in release binaries
+        shell: pwsh
+        run: |
+          foreach ($exe in Get-ChildItem apps/desktop/src-tauri/target/release/lipit-*.exe) {
+            $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($exe.FullName))
+            if ($text.Contains("src-tauri\binaries") -or $text.Contains("src-tauri/binaries")) {
+              throw "$($exe.Name) contains a build-machine engine path"
+            }
+          }
+
       - name: Verify native messaging host binary
         run: npm run test:native
 
       - name: Package unsigned NSIS setup
         run: npm run package:windows
+
+      - name: Extract release notes from CHANGELOG
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $lines = Get-Content CHANGELOG.md -Encoding utf8
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]" | Select-Object -First 1).LineNumber
+          if (-not $start) { $start = ($lines | Select-String -Pattern "^## \[Yayımlanmamış\]" | Select-Object -First 1).LineNumber }
+          $notes = @()
+          if ($start) {
+            foreach ($line in $lines[$start..($lines.Count - 1)]) {
+              if ($line -match "^## ") { break }
+              $notes += $line
+            }
+          }
+          $notes += ""
+          $notes += "## Kurulum"
+          $notes += ""
+          $notes += "Bu beta setup henüz kod imzalı değildir. Windows SmartScreen uyarı gösterebilir. SHA256SUMS.txt ile dosya özetini doğrulayabilirsiniz."
+          $notes += ""
+          $notes += "Kod imzalama ilkesi: https://github.com/$env:GITHUB_REPOSITORY/blob/main/docs/code-signing-policy.md"
+          $notes | Set-Content release/release-notes.md -Encoding utf8
 
       - name: Upload unsigned release candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -73,39 +107,33 @@ jobs:
           path: |
             release/Lipit-Capture-*-Windows-x64-unsigned-setup.exe
             release/SHA256SUMS.txt
+            release/release-notes.md
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish GitHub prerelease
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+  publish:
+    name: Publish GitHub prerelease
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download release candidate
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: lipit-windows-x64-unsigned-${{ github.sha }}
+          path: release
+
+      - name: Create prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $setup = Get-ChildItem release/Lipit-Capture-*-Windows-x64-unsigned-setup.exe | Select-Object -First 1
-          $notes = @"
-          ## Değişiklikler
-
-          - Masaüstü arayüzü dört adımlı, farklı ekran boyutlarına uyum sağlayan yeni çalışma alanıyla yenilendi.
-          - Klip başlangıç ve bitiş alanları saat:dakika:saniye:milisaniye biçimine geçirildi.
-          - Video üzerindeki araçlar Lipit'te aç, hızlı klip ve hızlı indirme olmak üzere üç simgeli düğme olarak tasarlandı.
-          - Video araçları sürüklenebilir hale getirildi; Shift+F9 ile gizleme ve yeniden gösterme eklendi.
-          - Lipit'te aç düğmesinin sürükleme sonrasında tıklamayı kaçırmasına neden olan Chromium davranışı düzeltildi.
-          - Eski bir setup dosyasının yanlışlıkla yeni sürüm adıyla seçilebilmesine neden olan paketleme hatası giderildi.
-
-          ## Kurulum
-
-          Bu beta setup henüz kod imzalı değildir. Windows SmartScreen uyarı gösterebilir.
-
-          ## Code signing policy
-
-          Projenin kod imzalama ilkesi: https://github.com/duhapolat/lipit-capture/blob/main/docs/code-signing-policy.md
-          "@
-          $notes | Set-Content release/release-notes.md -Encoding utf8
-          gh release create $env:GITHUB_REF_NAME `
-            $setup.FullName `
-            release/SHA256SUMS.txt `
-            --title "Lipit Capture $env:GITHUB_REF_NAME" `
-            --notes-file release/release-notes.md `
-            --prerelease `
+          setup=$(ls release/Lipit-Capture-*-Windows-x64-unsigned-setup.exe | head -n 1)
+          gh release create "$GITHUB_REF_NAME" "$setup" release/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Lipit Capture $GITHUB_REF_NAME" \
+            --notes-file release/release-notes.md \
+            --prerelease \
             --verify-tag

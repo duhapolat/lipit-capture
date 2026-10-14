@@ -3,6 +3,7 @@ import { existsSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { testMediaUrl } from "./test-media-source.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const desktopPath = resolve(root, "apps", "desktop", "src-tauri", "target", "release", "lipit-desktop.exe");
@@ -111,7 +112,7 @@ try {
     `(async () => {
       const invoke = window.__TAURI_INTERNALS__?.invoke;
       if (typeof invoke !== "function") throw new Error("Tauri invoke unavailable");
-      const media = await invoke("resolve_media", { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" });
+      const media = await invoke("resolve_media", { url: ${JSON.stringify(testMediaUrl)} });
       const job = await invoke("start_clip", { request: {
         url: media.url,
         qualityHeight: null,

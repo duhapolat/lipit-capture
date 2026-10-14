@@ -3,6 +3,10 @@ const candidateIds = new WeakMap<HTMLVideoElement, string>();
 const encryptedVideos = new WeakSet<HTMLVideoElement>();
 const capturesInFlight = new WeakSet<HTMLVideoElement>();
 const lastCaptureAt = new WeakMap<HTMLVideoElement, number>();
+// Page context lookups scan links and measure layout, so they are cached per
+// video during scrolling and recomputed fresh when the user presses a button.
+const contextCache = new WeakMap<HTMLVideoElement, { at: number; context: VideoPageContext }>();
+const CONTEXT_CACHE_MS = 2_000;
 const overlayPositions = new WeakMap<
   HTMLVideoElement,
   { xRatio: number; yRatio: number }
@@ -380,6 +384,15 @@ function videoPageContext(video: HTMLVideoElement): VideoPageContext {
   };
 }
 
+function cachedVideoPageContext(video: HTMLVideoElement): VideoPageContext {
+  const now = performance.now();
+  const cached = contextCache.get(video);
+  if (cached && now - cached.at < CONTEXT_CACHE_MS) return cached.context;
+  const context = videoPageContext(video);
+  contextCache.set(video, { at: now, context });
+  return context;
+}
+
 function renderedVideoArea(video: HTMLVideoElement): number {
   const rect = video.getBoundingClientRect();
   return Math.max(0, rect.width) * Math.max(0, rect.height);
@@ -426,7 +439,7 @@ function sendCapture(
   }
   const candidate = candidateFor(video);
   if (candidate.drm) {
-    status.textContent = "DRM protected — download unavailable";
+    status.textContent = "DRM korumalı — indirilemez";
     status.dataset.kind = "error";
     return;
   }
@@ -601,7 +614,7 @@ function createOverlay(video: HTMLVideoElement): OverlayController {
 
   const markEncrypted = () => {
     encryptedVideos.add(video);
-    status.textContent = "DRM protected — download unavailable";
+    status.textContent = "DRM korumalı — indirilemez";
     status.dataset.kind = "error";
   };
   video.addEventListener("encrypted", markEncrypted);
@@ -654,8 +667,6 @@ function layoutOverlays(): void {
       continue;
     }
     const rect = video.getBoundingClientRect();
-    const context = videoPageContext(video);
-    const primaryEnough = renderedVideoArea(video) >= largestVideoArea * 0.55;
     const visible =
       rect.width >= 180 &&
       rect.height >= 100 &&
@@ -663,9 +674,15 @@ function layoutOverlays(): void {
       rect.right > 0 &&
       rect.top < innerHeight &&
       rect.left < innerWidth;
+    if (!visible) {
+      controller.host.style.display = "none";
+      continue;
+    }
+    const context = cachedVideoPageContext(video);
+    const primaryEnough = renderedVideoArea(video) >= largestVideoArea * 0.55;
     const fullscreenCompatible =
       !fullscreen || (fullscreen !== video && fullscreen.contains(video));
-    if (!visible || !fullscreenCompatible || (!context.linked && !primaryEnough)) {
+    if (!fullscreenCompatible || (!context.linked && !primaryEnough)) {
       controller.host.style.display = "none";
       continue;
     }
@@ -757,4 +774,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   queueLayout();
 });
 addEventListener("hashchange", queueLayout);
-window.setInterval(queueLayout, 1500);
+// Single-page sites change the URL without reloading. Checking the address is
+// cheap; layout work only happens when it actually changed.
+window.setInterval(() => {
+  if (location.href !== observedPageUrl) queueLayout();
+}, 1500);
