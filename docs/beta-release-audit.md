@@ -32,7 +32,7 @@ GPL-3.0-or-later proje lisansı, üçüncü taraf lisans envanteri ve imzasız b
 | Chromium uzantı testleri | Geçti | CandidateStore ve ağ algılayıcı |
 | Native Messaging | Geçti | PING alışverişi |
 | Hızlı işlem penceresi | Geçti | Koyu tema, içerik ve ilerleme kökü WebView üzerinde doğrulandı |
-| Gerçek YouTube çözümleme | Geçti | Başlık döndü, çözümleme takılı kalmadı |
+| Gerçek çevrim içi çözümleme | Geçti | Başlık döndü, çözümleme takılı kalmadı |
 | Gerçek klip hattı | Geçti | 5,04 sn MP4, H.264; 3. saniyeye seek ve kare çözme başarılı |
 | npm güvenlik taraması | Geçti | 0 bilinen açık |
 | RustSec güvenlik taraması | Geçti | 465 paket, 0 bilinen açık |

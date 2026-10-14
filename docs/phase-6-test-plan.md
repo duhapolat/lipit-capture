@@ -13,7 +13,7 @@ Bu sürüm 1.0 öncesi test adayıdır. Her sorun için site adresini, tarayıc�
 
 Aşağıdaki her satırda bir tam video ve bir kısa klip deneyin.
 
-| Tarayıcı | YouTube | Instagram Reels | X / Twitter | Doğrudan MP4 |
+| Tarayıcı | Uzun video sitesi | Dikey kısa video akışı | Gönderi akışındaki video | Doğrudan MP4 |
 | --- | --- | --- | --- | --- |
 | Chrome veya Edge | Tam + klip | Tam + klip | Tam + klip | Tam + klip |
 
@@ -24,8 +24,8 @@ Her denemede şunları kontrol edin:
 - Kalite seçenekleri mantıklı görünüyor; örneğin kaynak 1440p ise 1440p seçeneği sunuluyor.
 - İndirme tamamlanınca dosya açılıyor, ses ve görüntü senkron kalıyor.
 - Videonun ortasına ve sonuna ilerletme hızlı çalışıyor; karıncalanma veya uzun bekleme olmuyor.
-- Instagram Reels süresi gerçek süreye yakın görünüyor ve 10 dakika olarak sabitlenmiyor.
-- X / Twitter videosunda ses oynatma listesinin yerine doğru video seçiliyor.
+- Dikey kısa video süresi gerçek süreye yakın görünüyor ve 10 dakika olarak sabitlenmiyor.
+- Gönderi akışındaki videoda ses oynatma listesinin yerine doğru video seçiliyor.
 
 ## 3. Klip modları
 
@@ -76,7 +76,7 @@ Her klipte başlangıç ve bitiş noktalarının yaklaşık doğru olduğunu, se
 
 - İndirme sırasında interneti kısa süre kapatın; uygulamanın anlaşılır bir hata vermesini ve takılı kalmamasını kontrol edin.
 - Geçersiz veya özel bir video adresi deneyin; uygulamanın kapanmadığını doğrulayın.
-- `https://www.youtube.com/@BugraSisman` gibi kanal/profil bağlantısının kısa sürede açıklayıcı hata verdiğini ve arayüzün yeniden kullanılabildiğini doğrulayın.
+- Bir kanal veya profil sayfası bağlantısının kısa sürede açıklayıcı hata verdiğini ve arayüzün yeniden kullanılabildiğini doğrulayın.
 - Bir indirmeyi iptal edin; kısmi dosya veya kilitli işlem kalıp kalmadığını kontrol edin.
 - Aynı dosya adını üreten videoyu ikinci kez indirin; mevcut dosyanın üzerine sessizce yazılmamalı.
 

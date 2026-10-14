@@ -1,6 +1,6 @@
 # Third-party notices
 
-Lipit Studio 1.0 beta 1 bundles or invokes the following third-party components in the Windows package.
+Lipit Capture bundles or invokes the following third-party components in the Windows package. Exact versions are pinned in `scripts/prepare-binaries.mjs` and listed in `docs/binaries.md`.
 
 ## FFmpeg and FFprobe
 

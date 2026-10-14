@@ -21,3 +21,19 @@ apps/extension/dist.crx
 .env
 .env.*
 !.env.example
+
+# Downloaded media, subtitles and lyrics must never enter the repository
+*.mp4
+*.webm
+*.mov
+*.mkv
+*.m4a
+*.mp3
+*.srt
+*.vtt
+*.ass
+*.lrc
+
+# Local working files
+.claude/
+docs/urun-denetim-raporu.md

@@ -13,9 +13,14 @@ Do not publish a working exploit, private key, token, downloaded media, browser 
 - Lipit processes DRM free media that the user is authorized to access.
 - Download and clipping run locally through packaged yt-dlp, FFmpeg, FFprobe and Deno executables.
 - The browser extension does not collect cookies, authorization headers or page contents. Optional browser cookie compatibility is disabled by default and is executed locally by yt-dlp only after the user enables it.
-- Localhost, private network, link local and credential bearing media URLs are rejected before a media engine starts.
+- Localhost, private network, link local and credential bearing media URLs are rejected before a media engine starts. Host names are also resolved and rejected if they point to such addresses.
+- Media engines are loaded only from the installation folder; release binaries contain no build-machine paths (checked in CI).
 - Existing destination files are never overwritten. Output is staged in the destination directory and committed with a no clobber operation.
 - Remote EJS components and third party PO Token providers are disabled by default.
+
+## Response
+
+Reports are acknowledged within 72 hours. Confirmed issues are fixed in a patch release and listed under "Güvenlik" in CHANGELOG.md. The rollback and incident procedures are described in [docs/release-process.md](docs/release-process.md).
 
 ## Release key handling
 

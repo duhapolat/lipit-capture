@@ -2,29 +2,23 @@
 
 [![Windows release build](https://github.com/duhapolat/lipit-capture/actions/workflows/windows-release.yml/badge.svg)](https://github.com/duhapolat/lipit-capture/actions/workflows/windows-release.yml)
 
-Kullanıcının erişim ve indirme hakkına sahip olduğu ( öncelikle Twitter, Instagram, YouTube ) DRM korumasız medyaları yerel olarak indirmek ve klip oluşturmak için tasarlanan masaüstü uygulaması.
+Kendi videoların, açık lisanslı içerikler ve indirme iznin olan DRM korumasız videolar için yerel, kişisel bir arşivleme ve klip oluşturma aracı. Tüm işlemler bilgisayarında gerçekleşir; Lipit içerik barındırmaz veya paylaşmaz.
 
-## Sürüm 1.0 beta 1
+> Lipit herhangi bir video platformu veya içerik sağlayıcısıyla bağlantılı değildir. Bir içeriği indirme ve kullanma hakkına sahip olup olmadığını belirlemek kullanıcının sorumluluğundadır. Ayrıntılar için [Kullanım Koşulları](KULLANIM-KOSULLARI.md) ve [Gizlilik Bildirimi](GIZLILIK.md) belgelerine bakın.
 
-1.0 beta 1, Lipit'in yerel medya atölyesi arayüzünü getirir. Tarayıcıdaki hızlı indirme ve hızlı klip işlemleri küçük bir ilerleme penceresinde çalışır; ana uygulama arka planda kalabilir. FFmpeg ağ protokolleri HTTP/HTTPS akışlarıyla sınırlıdır, canlı yayınların yanlışlıkla sınırsız indirilmesi engellenir, iptalde Windows işlem ağacı kapatılır ve uygulama açılışında eski geçici iş dosyaları temizlenir.
+## Özellikler
 
-Tarayıcıdaki medya araçları video üzerinde sürüklenebilir ve yarı şeffaftır. Hızlı indirme ve hızlı klip işlemleri ana pencereyi göstermeden arka planda başlar; küçük bir ilerleme penceresi yüzdeyi gösterir ve işlem tamamlandığında kendiliğinden kapanır. Medya motorlarının durumu ana sayfadaki kart yerine üst çubuktaki açılır panelde bulunur.
+- **Tarayıcıdan tek tıkla:** Video üzerindeki araç çubuğundan "Lipit'te aç", "Hızlı klip" ve "Hızlı indir". Hızlı klip videonun o anki zamanından başlar. Arka arkaya gönderilen hızlı işlemler sıraya alınır, hiçbiri kaybolmaz.
+- **Klip editörü:** Başlangıç ve bitiş milisaniye hassasiyetinde seçilir ve seçilen anların karesi önizlenir. **Hızlı kesim** çabuk ve sorunsuz ileri sarılabilen bir MP4 üretir; **Hassas kesim** seçilen kareye daha yakın keser.
+- **Güvenli kayıt:** Hiçbir dosyanın üzerine yazılmaz. Sabit klasörde çakışan adlar `ad_1.mp4` olur. Çıktı önce geçici iş alanında hazırlanır.
+- **Geçmiş:** Küçük resimler, arama, oynatma, klasörde gösterme ve tek kayıt silme. Geçmişi silmek dosyaları silmez.
+- **Anlaşılır hatalar:** Giriş gerekli, özel video, bölge kısıtı, kaldırılmış video, hız sınırı ve motor güncelliği ayrı ayrı açıklanır.
+- **Gizlilik:** Telemetri yok. Yerel günlük maskelenir, istatistikler yalnızca bu bilgisayarda tutulur. Güncelleme denetimi yalnızca sürüm numarası okur ve kapatılabilir.
+- **Güvenlik:** Özel ağ ve yerel adresler (DNS çözümü dahil) reddedilir. FFmpeg protokolleri sınırlıdır. Motorlar sabit sürüm ve SHA-256 ile doğrulanır. yt-dlp güncellemesi doğrulanamazsa geri alınır.
 
-Videonun tamamı indirilebilir veya başlangıç ve bitiş zamanı milisaniye hassasiyetinde seçilerek MP4 klip oluşturulabilir. **Hızlı kesim** sosyal medya kaynaklarında da bağımsız ve sorunsuz ileri sarılabilen bir MP4 üretmek için hızlı H.264 kodlama kullanır. **Hassas kesim** daha yüksek kalite ayarıyla seçilen kareye ulaşır. Tarayıcıdaki **Klip** düğmesi, videonun o anki oynatma zamanını başlangıç noktası olarak masaüstüne aktarır.
+Uzantı ağ isteklerini değiştirmez veya engellemez; çerez, token ve yetkilendirme başlığı toplamaz. DRM korumalı içerik desteklenmez.
 
-Masaüstü uygulaması tarayıcıdan gelen Referer, Origin ve User-Agent bağlamını doğrulayarak yt-dlp ve doğrudan FFmpeg isteklerine aktarır. Gelişmiş uyumluluk ayarlarında tarayıcı çerezleri yalnızca kullanıcı açıkça etkinleştirirse işlem sırasında yt-dlp tarafından okunur; uzantı çerezleri toplamaz veya native mesaja eklemez.
-
-Deno çalışma zamanı ve yt-dlp-ejs desteği uygulamayla birlikte gelir. Yerleşik yt-dlp motoru uygulamadan ayrı güncellenebilir. İhtiyaç halinde resmi uzak EJS bileşeni etkinleştirilebilir. PO Token sağlayıcıları için uygulamaya özel, varsayılan olarak kapalı bir yt-dlp eklenti klasörü hazırlanır; üçüncü taraf sağlayıcı otomatik kurulmaz.
-
-Tamamlanan indirmeler yerel geçmişte tutulur ve dosya bilgisayarda duruyorsa uygulama içinde MP4 olarak önizlenebilir. Geçmiş temizlendiğinde medya dosyaları silinmez. Klavye kısayolları `?` tuşuyla görüntülenebilir. Akış varyantları geçici CDN imzaları, kalite klasörleri ve manifest adları normalize edilerek aynı medya altında gruplanır.
-
-Uzantı DOM algılamasına ek olarak ağ trafiğini pasif biçimde gözlemler. MP4, WebM, MOV, HLS ve DASH kaynakları MIME türü ve URL sinyalleriyle tanınır. Segment ve range istekleri elenir; adaylar sekme bazlı CandidateStore içinde normalize edilir, aynı kaynaklar birleştirilir ve sayı sınırı uygulanır. Blob video görüldüğünde en uygun ağ manifesti DOM bilgileriyle birleştirilerek Native Messaging üzerinden masaüstüne aktarılır. Video araçlarında standart İndir/Klip seçeneklerine ek olarak hızlı profile bağlı tek tık işlemleri ve gizle/tekrar göster kontrolü bulunur.
-
-X/Twitter akışlarında uzantı video kartının tweet kalıcı bağlantısını doğrudan bulur. `mp4a` gibi yalnızca ses içeren HLS listeleri elenir ve mevcutsa ana HLS manifesti tercih edilir.
-
-TikTok akışlarında videoyu saran kalıcı bağlantı ve görünür karta en yakın `/@kullanici/video/kimlik` bağlantısı seçilir. Böylece akışta önceden yüklenen sonraki video yerine, düğmenin üzerinde bulunduğu video çözülür.
-
-Uzantı ağ isteklerini değiştirmez veya engellemez. Çerez, token ve yetkilendirme başlığı toplamaz.
+Mimari ve güvenlik sınırları [docs/architecture.md](docs/architecture.md) dosyasında, değişiklikler [CHANGELOG.md](CHANGELOG.md) dosyasında, ürün kapsamı [docs/urun-vizyonu.md](docs/urun-vizyonu.md) dosyasında anlatılır.
 
 ## Çalıştırma
 
@@ -35,7 +29,7 @@ Uzantı ağ isteklerini değiştirmez veya engellemez. Çerez, token ve yetkilen
 
 Derleme: `npm run build` (çalıştırılabilir dosya). Testleri çalıştırıp imzasız Windows setup üretmek için proje kökünde `npm run bundle:windows` kullanın. Daha önce doğrulanmış aynı derlemeden yalnızca setup üretmek için `npm run package:windows` kullanılabilir. Medya araçları Tauri `externalBin` olarak paketlenir; React process başlatamaz. Kaynaklar ve sürümler [docs/binaries.md](docs/binaries.md) dosyasındadır.
 
-Beta sürüm kapısı: Lipit kapalıyken proje kökünde `npm run check:release` çalıştırın. Bu komut güvenlik kurallarını, bağımlılıkları, Rust birim testlerini, sıkı kod taramasını, uzantıyı ve arayüzü kontrol eder; uygulamayı yeniden derler; ardından yerel köprü, hızlı pencere, gerçek YouTube çözümleme ve beş saniyelik MP4 klip/ileri sarma testini çalıştırır. Çevrim içi testler için internet bağlantısı gerekir. Son denetim sonuçları [beta sürüm raporunda](docs/beta-release-audit.md) kayıtlıdır.
+Beta sürüm kapısı: Lipit kapalıyken proje kökünde `npm run check:release` çalıştırın. Bu komut güvenlik kurallarını, bağımlılıkları, Rust birim testlerini, sıkı kod taramasını, uzantıyı ve arayüzü kontrol eder; uygulamayı yeniden derler; ardından yerel köprü, hızlı pencere, açık lisanslı örnek bir videoyla gerçek çözümleme ve beş saniyelik MP4 klip/ileri sarma testini çalıştırır. Örnek video `LIPIT_TEST_MEDIA_URL` ortam değişkeniyle, sahibi olduğun veya indirme iznin bulunan başka bir videoyla değiştirilebilir. Çevrim içi testler için internet bağlantısı gerekir. Son denetim sonuçları [beta sürüm raporunda](docs/beta-release-audit.md) kayıtlıdır.
 
 ## Tarayıcı uzantısını kurma
 
@@ -43,28 +37,31 @@ Beta sürüm kapısı: Lipit kapalıyken proje kökünde `npm run check:release`
 2. Bir kez `npm run install:bridge` çalıştırın. Bu işlem Native Messaging hostunu mevcut Windows kullanıcısı için Chrome, Edge ve Brave'e kaydeder.
 3. Tarayıcının uzantılar sayfasında **Geliştirici modu**nu açın.
 4. **Paketlenmemiş öğe yükle** ile `apps/extension/dist` klasörünü seçin.
-5. Video içeren bir HTTP/HTTPS sayfasını yenileyin. Videonun sağ üstündeki **İndir** düğmesi adayı masaüstüne gönderir ve Lipit'i açar.
+5. Video içeren bir HTTP/HTTPS sayfasını yenileyin. Videonun köşesindeki Lipit düğmeleri adayı masaüstüne gönderir.
+
+Kurulu uygulamada aynı adımlar ilk açılış sihirbazında ve Ayarlar › Tarayıcı uzantısı bölümünde, bağlantı durumuyla birlikte gösterilir.
 
 Uzantı kimliği sabittir: `nhcgifoaikjkndkbnkkllknmlfbkdcbc`. Native host kayıt dosyası yalnızca bu uzantının bağlanmasına izin verir. Uzantı çerez veya yetkilendirme başlığı toplamaz.
 
 ## Kullanım
 
-Tek video URL’sini yapıştırın, **Videoyu çözümle** düğmesine basın ve kaliteyi seçin. Alt bölümdeki **Tamamını indir** düğmesi videonun tamamını, yanındaki **Klip oluştur** düğmesi seçilen zaman aralığını kaydeder. İlk açılışta hızlı profil hazırlanır; kayıt konumu, kalite, 15 saniye ile 5 dakika arasındaki klip süresi ve kesim yöntemi daha sonra **Ayarlar** bölümünden değiştirilebilir. Mevcut dosyanın üzerine yazılmaz; başka bir ad seçin. Uygulama önce kendi geçici iş klasöründe çalışır, çıktı dosyasını seçilen dizine güvenli şekilde taşır ve iş klasörünü temizler.
+İlk açılışta kullanım koşullarını onaylayın ve hızlı profili kaydedin. Tek video URL’sini yapıştırın, **Videoyu getir** düğmesine basın ve kaliteyi seçin. Alt bölümdeki **Tamamını indir** düğmesi videonun tamamını, yanındaki **Klip oluştur** düğmesi seçilen zaman aralığını kaydeder. İlk açılışta hızlı profil hazırlanır; kayıt konumu, kalite, 15 saniye ile 5 dakika arasındaki klip süresi ve kesim yöntemi daha sonra **Ayarlar** bölümünden değiştirilebilir. Mevcut dosyanın üzerine yazılmaz; başka bir ad seçin. Uygulama önce kendi geçici iş klasöründe çalışır, çıktı dosyasını seçilen dizine güvenli şekilde taşır ve iş klasörünü temizler.
 
-DRM korumalı içerikleri çözmeye veya indirmeye çalışmaz. Çıktı kalitesi ve kullanılabilir biçimler kaynağa ve yt-dlp desteğine bağlıdır.
+DRM veya benzeri koruma önlemleriyle korunan içerikleri çözmeye, indirmeye veya bu önlemleri aşmaya çalışmaz. Çıktı kalitesi ve kullanılabilir biçimler kaynağa ve yt-dlp desteğine bağlıdır.
 
-## Sonraki aşamalar
+## Sorun giderme ve katkı
 
-- [x] Chromium Manifest V3 uzantısı, DOM detector ve video overlay
-- [x] Sürümlü Native Messaging protokolü, şema ve boyut doğrulaması
-- [x] Tarayıcıdan gelen adayı masaüstünde otomatik çözümleme
-- [x] Phase 3: network detector, MP4/HLS/DASH adayları, CandidateStore ve deduplication
-- [x] Phase 4: Hızlı kesim, Hassas kesim ve timeline kontrolleri
-- [x] Phase 5: İstek başlıkları, isteğe bağlı çerezler, motor güncelleme, Deno, yt-dlp-ejs ve PO Token sağlayıcı hazırlığı
-- [x] Phase 6: İndirme geçmişi, klavye kısayolları, masaüstü önizleme ve gelişmiş akış gruplama
-- [x] 0.7: İlk açılış hızlı profili, bağımsız Ayarlar ekranı ve kompakt hızlı işlem düğmeleri
+- Sık karşılaşılan sorunlar: [docs/SSS.md](docs/SSS.md)
+- Sürüm, geri alma ve olay müdahalesi: [docs/release-process.md](docs/release-process.md)
+- Katkı rehberi: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Testler: `npm run check:beta` (çevrim dışı), `npm run check:release` (tam sürüm kapısı)
 
-Arayüz için ertelenen son düzenleme maddeleri [docs/polish-backlog.md](docs/polish-backlog.md) dosyasında tutulur.
+## Yasal
+
+- [Kullanım Koşulları](KULLANIM-KOSULLARI.md): Lipit yalnızca kendi içeriklerin, açık lisanslı içerikler ve hak sahibinin izin verdiği videolar için kullanılabilir.
+- [Gizlilik Bildirimi](GIZLILIK.md) ([English](PRIVACY.md)): Lipit telemetri göndermez; tüm veriler bilgisayarında kalır.
+- Lipit ücretsizdir; reklam, ücretli sürüm veya içerik barındırma yoktur.
+- Üçüncü taraflara ait adlar ve markalar sahiplerine aittir.
 
 ## Lisans
 
